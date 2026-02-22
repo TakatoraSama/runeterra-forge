@@ -287,5 +287,3 @@ func _perform_level_up(new_card_id: String) -> void:
 	var new_name = new_data.get("Name", new_card_id)
 	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
 		old_name, old_name, old_id, new_name, new_card_id])
-
-

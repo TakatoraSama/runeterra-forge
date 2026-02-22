@@ -497,7 +497,7 @@ func _game_end_trundle_buff(card: Node, card_data: Dictionary) -> void:
 	var my_name: String   = card_data.get("Name", card.card_id)
 
 	print("========== BEHOLD DEBUG: %s (owner=%d) =========" % [my_name, card.owner_player_id])
-	var beheld_cards := cm.get_beheld_cards(card.owner_player_id)
+	var beheld_cards: Array = cm.get_beheld_cards(card.owner_player_id)
 	print("  Total beheld: %d" % beheld_cards.size())
 
 	var count := 0

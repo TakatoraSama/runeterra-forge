@@ -313,7 +313,7 @@ func _on_sun_disc_restored(owner_id: int) -> void:
 		return
 
 	# ── Step 1: draw un-beheld Ascended cards from the deck ───────────────────
-	var beheld_cards := cm.get_beheld_cards(owner_id)
+	var beheld_cards: Array = cm.get_beheld_cards(owner_id)
 	var beheld_names: Array = []
 	for bc in beheld_cards:
 		var bc_data = CardDatabase.CARDS.get(bc.card_id)

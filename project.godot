@@ -15,6 +15,12 @@ run/main_scene="uid://dt0haunvy1sin"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://Assets/icon.svg"
 
+[autoload]
+
+AbilityResolver="*res://Scripts/AbilityResolver.gd"
+LevelUpManager="*res://Scripts/LevelUpManager.gd"
+AuraSystem="*res://Scripts/AuraSystem.gd"
+
 [display]
 
 window/size/viewport_width=1920
@@ -24,12 +30,6 @@ window/stretch/mode="canvas_items"
 [physics]
 
 3d/physics_engine="Jolt Physics"
-
-[autoload]
-
-AbilityResolver="*res://Scripts/AbilityResolver.gd"
-LevelUpManager="*res://Scripts/LevelUpManager.gd"
-AuraSystem="*res://Scripts/AuraSystem.gd"
 
 [rendering]
 

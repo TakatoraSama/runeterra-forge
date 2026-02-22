@@ -16,7 +16,7 @@ const CARDS = {
 		"LevelUp": "I've seen {ally_threshold}+ other allies or landmarks in play.",
 		"LevelUpTo": "13",
 		"AbilityType": "summon_sun_disc",
-		"BalanceValues": {"ally_threshold": 4},
+		"BalanceValues": {"ally_threshold": 6},
 		"PreviewTooltip": [1, 13, 25, 29, 30]
 	},
 	"13": {
