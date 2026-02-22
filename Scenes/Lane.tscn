@@ -1,0 +1,63 @@
+[gd_scene format=3 uid="uid://dowc1je4c5p7"]
+
+[ext_resource type="Texture2D" uid="uid://cyri51vx2km2d" path="res://Assets/LaneComponent/lane_border.png" id="1_pbupu"]
+[ext_resource type="Texture2D" uid="uid://b0uty53hbiqfy" path="res://Assets/LaneComponent/lane_base.png" id="2_o1qf5"]
+[ext_resource type="FontFile" uid="uid://bh0252bjv1o3m" path="res://Fonts/beaufort/BeaufortforLOL-Bold.ttf" id="2_tclnn"]
+[ext_resource type="FontFile" uid="uid://c13443r0p1w4f" path="res://Fonts/univers/UniversCnRg.ttf" id="3_16efg"]
+[ext_resource type="Texture2D" uid="uid://d4g7gkjgjvs6p" path="res://Assets/LaneSprite/HexcoreFoundry.png" id="3_tclnn"]
+
+[sub_resource type="FontVariation" id="FontVariation_at5c5"]
+base_font = ExtResource("3_16efg")
+spacing_top = -4
+
+[node name="Lane" type="Node2D" unique_id=942160807]
+
+[node name="LaneBorder" type="Sprite2D" parent="." unique_id=786331758]
+z_index = -2
+texture = ExtResource("1_pbupu")
+
+[node name="LaneName" type="RichTextLabel" parent="." unique_id=1862305305]
+z_index = -2
+offset_left = -80.0
+offset_top = -55.0
+offset_right = 80.0
+offset_bottom = -31.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 3
+theme_override_fonts/normal_font = ExtResource("2_tclnn")
+theme_override_font_sizes/normal_font_size = 20
+text = "Hexcore Foundry"
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LaneDesc" type="RichTextLabel" parent="." unique_id=1314049440]
+z_index = -2
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -80.0
+offset_top = 20.0
+offset_right = 80.0
+offset_bottom = 62.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 2
+theme_override_fonts/normal_font = SubResource("FontVariation_at5c5")
+theme_override_font_sizes/normal_font_size = 12
+text = "Both Player draw 1."
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LaneBase" type="Sprite2D" parent="." unique_id=1502644778]
+clip_children = 2
+z_index = -3
+texture = ExtResource("2_o1qf5")
+
+[node name="LaneSprite" type="Sprite2D" parent="LaneBase" unique_id=1000977609]
+scale = Vector2(0.33, 0.33)
+texture = ExtResource("3_tclnn")

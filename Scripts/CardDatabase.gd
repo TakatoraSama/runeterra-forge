@@ -1,0 +1,503 @@
+class_name CardDatabase
+
+const CARDS = {
+	# Champions - Azir Line
+	"1": {
+		"Name": "Azir",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Azir1.webp",
+		"Level": 1,
+		"Cost": 6,
+		"Power": 5,
+		"Keyword": "",
+		"Skill": "{Game Start}: Summon a [Buried Sun Disc] at mid lane.",
+		"LevelUp": "I've seen {ally_threshold}+ other allies or landmarks in play.",
+		"LevelUpTo": "13",
+		"AbilityType": "summon_sun_disc",
+		"BalanceValues": {"ally_threshold": 4},
+		"PreviewTooltip": [1, 13, 25, 29, 30]
+	},
+	"13": {
+		"Name": "Azir",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Azir2.webp",
+		"Level": 2,
+		"Cost": 6,
+		"Power": 6,
+		"Keyword": "",
+		"Skill": "{Aura}: Your other Ascended allies in play have +{aura_power} Power.",
+		"LevelUp": "You've {restored the Sun Disc}.",
+		"LevelUpTo": "25",
+		"AbilityType": "aura_ascended_buff",
+		"BalanceValues": {"aura_power": 2},
+		"PreviewTooltip": [1, 13, 25, 29, 30]
+	},
+	"25": {
+		"Name": "Azir",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Azir3.webp",
+		"Level": 3,
+		"Cost": 6,
+		"Power": 8,
+		"Keyword": "Barrier",
+		"Skill": "{Aura}: Your other Ascended allies in play have +{aura_power} Power and their {Game End} skill activate twice.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "aura_ascended_buff",
+		"BalanceValues": {"aura_power": 2},
+		"PreviewTooltip": [1, 13, 25, 29, 30]
+	},
+	
+	# Champions - Renekton Line
+	"2": {
+		"Name": "Renekton",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Renekton1.webp",
+		"Level": 1,
+		"Cost": 3,
+		"Power": 4,
+		"Keyword": "Challenger",
+		"Skill": "{Round Start}: Grant me +{win_power} Power if you're winning here.",
+		"LevelUp": "I've increased my Power by {power_threshold}+.",
+		"LevelUpTo": "14",
+		"AbilityType": "conditional_buff",
+		"BalanceValues": {"win_power": 2, "power_threshold": 4},
+		"PreviewTooltip": [2, 14, 26, 29, 30]
+	},
+	"14": {
+		"Name": "Renekton",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Renekton2.webp",
+		"Level": 2,
+		"Cost": 3,
+		"Power": 5,
+		"Keyword": "Challenger",
+		"Skill": "{Round Start}: Grant me +{win_power} Power if you're winning here.",
+		"LevelUp": "You've {restored the Sun Disc}.",
+		"LevelUpTo": "26",
+		"AbilityType": "conditional_buff",
+		"BalanceValues": {"win_power": 3},
+		"PreviewTooltip": [2, 14, 26, 29, 30]
+	},
+	"26": {
+		"Name": "Renekton",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Renekton3.webp",
+		"Level": 3,
+		"Cost": 3,
+		"Power": 10,
+		"Keyword": "Challenger",
+		"Skill": "{Round Start}: Grant me +{win_power} Power if you're winning here. [br] {Game End}: Grant an enemy here -{enemy_debuff} Power",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "conditional_buff",
+		"BalanceValues": {"win_power": 3, "enemy_debuff": 3},
+		"PreviewTooltip": [2, 14, 26, 29, 30]
+	},
+	
+	# Champions - Nasus Line
+	"3": {
+		"Name": "Nasus",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Nasus1.webp",
+		"Level": 1,
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": "",
+		"Skill": "{Round End}: Kills the weakest ally here and grant me +{kill_power} Power.",
+		"LevelUp": "You've killed {kill_threshold}+ units.",
+		"LevelUpTo": "15",
+		"AbilityType": "kill_ally_buff",
+		"BalanceValues": {"kill_power": 2, "kill_threshold": 2},
+		"PreviewTooltip": [3, 15, 27, 29, 30]
+	},
+	"15": {
+		"Name": "Nasus",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Nasus2.webp",
+		"Level": 2,
+		"Cost": 2,
+		"Power": 3,
+		"Keyword": "Fearsome",
+		"Skill": "{Round End}: Kills the weakest ally here and grant me +{kill_power} Power.",
+		"LevelUp": "You've {restored the Sun Disc}.",
+		"LevelUpTo": "27",
+		"AbilityType": "kill_ally_buff",
+		"BalanceValues": {"kill_power": 3},
+		"PreviewTooltip": [3, 15, 27, 29, 30]
+	},
+	"27": {
+		"Name": "Nasus",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Nasus3.webp",
+		"Level": 3,
+		"Cost": 2,
+		"Power": 10,
+		"Keyword": "Fearsome",
+		"Skill": "{Round End}: Kills the weakest ally here and grant me +{kill_power} Power. [br] {Game End}: Kill an enemy here that has less power than me.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "kill_ally_buff",
+		"BalanceValues": {"kill_power": 3},
+		"PreviewTooltip": [3, 15, 27, 29, 30]
+	},
+	
+	# Champions - Xerath Line
+	"4": {
+		"Name": "Xerath",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Xerath1.webp",
+		"Level": 1,
+		"Cost": 4,
+		"Power": 3,
+		"Keyword": "",
+		"Skill": "{Play}: Drain {drain_power} Power from other units here.",
+		"LevelUp": "I've seen {ally_threshold}+ allies in play with increased power.",
+		"LevelUpTo": "16",
+		"AbilityType": "drain_power",
+		"BalanceValues": {"drain_power": 2, "ally_threshold": 4},
+		"PreviewTooltip": [4, 16, 28, 29, 30]
+	},
+	"16": {
+		"Name": "Xerath",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Xerath2.webp",
+		"Level": 2,
+		"Cost": 4,
+		"Power": 4,
+		"Keyword": "",
+		"Skill": "{Aura}: Back-row enemies here have -{aura_debuff} Power.",
+		"LevelUp": "You've {restored the Sun Disc}.",
+		"LevelUpTo": "28",
+		"AbilityType": "aura_debuff",
+		"BalanceValues": {"aura_debuff": 1},
+		"PreviewTooltip": [4, 16, 28, 29, 30]
+	},
+	"28": {
+		"Name": "Xerath",
+		"Type": "Champion",
+		"SubType": "Ascended",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Xerath3.webp",
+		"Level": 3,
+		"Cost": 4,
+		"Power": 7,
+		"Keyword": "Barrier",
+		"Skill": "{Aura}: Back-row enemies have -{aura_debuff} Power. [br] {Game End}: Grant me the Power of front-row enemies here.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "aura_debuff",
+		"BalanceValues": {"aura_debuff": 1},
+		"PreviewTooltip": [4, 16, 28, 29, 30]
+	},
+	
+	# Champions - Tryndamere Line
+	"9": {
+		"Name": "Tryndamere",
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Tryndamere1.webp",
+		"Level": 1,
+		"Cost": 2,
+		"Power": 3,
+		"Keyword": "",
+		"Skill": "",
+		"LevelUp": "If I would die, I Level Up instead.",
+		"LevelUpTo": "21",
+		"AbilityType": "levelup_on_death",
+		"PreviewTooltip": [9, 21]
+	},
+	"21": {
+		"Name": "Tryndamere",
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Tryndamere2.webp",
+		"Level": 2,
+		"Cost": 2,
+		"Power": 4,
+		"Keyword": "Fearsome, Tough",
+		"Skill": "If I would die, grant me +{survive_power} Power instead.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "survive_death",
+		"BalanceValues": {"survive_power": 2},
+		"PreviewTooltip": [9, 21]
+	},
+	
+	# Champions - Trundle Line
+	"31": {
+		"Name": "Trundle",
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Trundle1.webp",
+		"Level": 1,
+		"Cost": 3,
+		"Power": 3,
+		"Keyword": "Regeneration",
+		"Skill": "{Play}: Create an [Ice Pillar] in hand.",
+		"LevelUp": "You've played an [Ice Pillar].",
+		"LevelUpTo": "32",
+		"AbilityType": "create_card",
+		"PreviewTooltip": [31, 32, 33]
+	},
+	"32": {
+		"Name": "Trundle",
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Trundle2.webp",
+		"Level": 2,
+		"Cost": 3,
+		"Power": 4,
+		"Keyword": "Regeneration",
+		"Skill": "{Game End}: Grant me +{behold_power} Power for each {mana_threshold}+ mana unit you behold.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "conditional_buff",
+		"BalanceValues": {"behold_power": 2, "mana_threshold": 5},
+		"PreviewTooltip": [31, 32, 33]
+	},
+	
+	# Landmarks
+	"29": {
+		"Name": "Buried Sun Disc",
+		"Type": "Landmark",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/BuriedSunDisc.webp",
+		"Cost": 0,
+		"Keyword": "",
+		"Skill": "Once you have {ascended_threshold}+ level 2 Ascended allies in play, {restore the Sun Disc}.",
+		"LevelUpTo": "30",
+		"AbilityType": "transform_landmark",
+		"BalanceValues": {"ascended_threshold": 2},
+		"PreviewTooltip": [29, 30]
+	},
+	"30": {
+		"Name": "Restored Sun Disc",
+		"Type": "Landmark",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/RestoredSunDisc.webp",
+		"Cost": 0,
+		"Keyword": "",
+		"Skill": "Draw {draw_count} for each Ascended ally that is not beheld. [br] For the rest of the game, your level 2 Ascended allies are level 3.",
+		"LevelUpTo": null,
+		"AbilityType": "ascend_champions",
+		"BalanceValues": {"draw_count": 1},
+		"PreviewTooltip": [29, 30]
+	},
+	
+	# Followers
+	"33": {
+		"Name": "Ice Pillar",
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/IcePillar.webp",
+		"Cost": 5,
+		"Power": 5,
+		"Keyword": "Regeneration",
+		"Skill": "{Play}: Next turn, you get +{mana_bonus} mana.",
+		"AbilityType": "mana_ramp",
+		"BalanceValues": {"mana_bonus": 5},
+		"PreviewTooltip": [31, 32, 33]
+	}
+}
+
+
+static func populate_card_visuals(card: Node, card_data: Dictionary) -> void:
+	"""Populate all visual text and sprite nodes on a card from card_data.
+	Single source of truth for card display — replaces duplicated setup blocks
+	that previously appeared in Deck.gd, CardManager.gd, and Card.gd."""
+	var name_label = card.get_node_or_null("CardFront/TextContainer/CardName")
+	if name_label:
+		name_label.text = str(card_data.get("Name", ""))
+
+	var cost_label = card.get_node_or_null("CardFront/Cost")
+	if cost_label:
+		cost_label.text = str(card_data.get("Cost", 0))
+
+	apply_power_visual(card, card_data)
+
+	var skill_label = card.get_node_or_null("CardFront/TextContainer/Skill")
+	if skill_label:
+		skill_label.text = format_card_text(str(card_data.get("Skill", "")), card_data.get("BalanceValues", {}))
+
+	var level_up_raw = card_data.get("LevelUp", null)
+	var level_up_text: String = str(level_up_raw) if level_up_raw != null else ""
+	var has_level_up := level_up_raw != null and level_up_text != ""
+	var lv_label = card.get_node_or_null("CardFront/TextContainer/LevelUp")
+	var lv_sep = card.get_node_or_null("CardFront/TextContainer/LevelSeperator")
+	if lv_label:
+		lv_label.text = format_card_text(level_up_text, card_data.get("BalanceValues", {})) if has_level_up else ""
+		lv_label.visible = has_level_up
+	if lv_sep:
+		lv_sep.visible = has_level_up
+
+	var sprite_path: String = str(card_data.get("Sprite", ""))
+	if sprite_path != "":
+		var sprite_node = card.get_node_or_null("CardFront/CardSpriteParent/CardSprite")
+		if sprite_node:
+			sprite_node.texture = ResourceLoader.load(sprite_path)
+
+	var sub_type: String = str(card_data.get("SubType", ""))
+	var has_sub_type := sub_type != ""
+	var sub_label = card.get_node_or_null("CardFront/SubType")
+	var sub_bg = card.get_node_or_null("CardFront/CardSubType")
+	if sub_label:
+		if has_sub_type:
+			sub_label.text = sub_type.to_upper()
+		sub_label.visible = has_sub_type
+	if sub_bg:
+		sub_bg.visible = has_sub_type
+
+
+static func format_card_text(text: String, balance_values: Dictionary = {}) -> String:
+	"""Replace {..} with gold (substituting balance_values if key matches) and [..] with blue,
+	while preserving real BBCode tags (e.g. [br])."""
+	var result := ""
+	var i := 0
+
+	while i < text.length():
+		var c := text[i]
+
+		if c == "[":
+			var close_idx := text.find("]", i + 1)
+			if close_idx != -1:
+				var content := text.substr(i + 1, close_idx - i - 1)
+				if _is_bbcode_tag(content):
+					result += text.substr(i, close_idx - i + 1)
+				else:
+					result += "[color=#54a5ff]" + content + "[/color]"
+				i = close_idx + 1
+				continue
+
+		if c == "{":
+			var close_idx := text.find("}", i + 1)
+			if close_idx != -1:
+				var content := text.substr(i + 1, close_idx - i - 1)
+				if balance_values.has(content):
+					result += str(balance_values[content])
+				else:
+					result += "[color=#ffca4b]" + content + "[/color]"
+				i = close_idx + 1
+				continue
+
+		result += c
+		i += 1
+
+	return result
+
+
+static func _is_bbcode_tag(content: String) -> bool:
+	var tag := content.strip_edges()
+	if tag == "":
+		return false
+
+	if tag.begins_with("/"):
+		tag = tag.substr(1)
+
+	var eq_idx := tag.find("=")
+	if eq_idx != -1:
+		tag = tag.substr(0, eq_idx)
+
+	tag = tag.to_lower()
+	var known_tags := {
+		"b": true,
+		"i": true,
+		"u": true,
+		"s": true,
+		"code": true,
+		"p": true,
+		"center": true,
+		"left": true,
+		"right": true,
+		"fill": true,
+		"indent": true,
+		"url": true,
+		"img": true,
+		"font": true,
+		"font_size": true,
+		"color": true,
+		"bgcolor": true,
+		"outline_size": true,
+		"outline_color": true,
+		"table": true,
+		"cell": true,
+		"ul": true,
+		"ol": true,
+		"li": true,
+		"hint": true,
+		"dropcap": true,
+		"opentype_features": true,
+		"lang": true,
+		"br": true,
+		"lb": true,
+		"rb": true
+	}
+
+	return known_tags.has(tag)
+
+
+static func get_card_id_by_name(card_name: String, prefer_collectible: bool = false) -> String:
+	"""Find the first card ID matching the given name.
+	If prefer_collectible is true, prioritise Collectible entries."""
+	var fallback := ""
+	for id in CARDS:
+		if CARDS[id].get("Name", "") == card_name:
+			if prefer_collectible and CARDS[id].get("Collectible", false):
+				return id
+			if fallback == "":
+				fallback = id
+	return fallback
+
+
+static func apply_power_visual(card_node: Node, card_data: Dictionary, source_card: Node = null) -> void:
+	"""Apply power text/icon UI rules.
+	Landmark cards hide both the Power label and the CardPower sprite."""
+	if card_node == null:
+		return
+
+	var power_label = card_node.get_node_or_null("CardFront/Power")
+	var power_sprite = card_node.get_node_or_null("CardFront/CardPower")
+	var is_landmark := str(card_data.get("Type", "")) == "Landmark"
+	var should_show_power := (not is_landmark) and card_data.has("Power")
+
+	if power_label:
+		power_label.visible = should_show_power
+		if should_show_power:
+			if source_card and source_card.has_method("get_power_display_text"):
+				power_label.text = source_card.get_power_display_text()
+			else:
+				power_label.text = str(card_data.get("Power", 0))
+		else:
+			power_label.text = ""
+
+	if power_sprite:
+		power_sprite.visible = should_show_power

@@ -1,0 +1,135 @@
+[gd_scene format=3 uid="uid://dt0haunvy1sin"]
+
+[ext_resource type="Script" uid="uid://b50wmlswixqd0" path="res://Scripts/CardManager.gd" id="1_rgh2o"]
+[ext_resource type="Script" uid="uid://difqw8ooxdevu" path="res://Scripts/BoardGeneration.gd" id="2_jw32o"]
+[ext_resource type="PackedScene" uid="uid://csked85xvrkrr" path="res://Scenes/CardSlot.tscn" id="2_pbw6q"]
+[ext_resource type="Script" uid="uid://brm8tsfk8mxly" path="res://Scripts/PlayerHand.gd" id="3_v1gob"]
+[ext_resource type="Script" uid="uid://ct2kwpasmmpkb" path="res://Scripts/Deck.gd" id="4_v1gob"]
+[ext_resource type="Texture2D" uid="uid://dyufxv8em17el" path="res://Assets/card_back.webp" id="5_v1gob"]
+[ext_resource type="Script" uid="uid://dihssh1j1l8k1" path="res://Scripts/InputManager.gd" id="6_jw32o"]
+[ext_resource type="Script" uid="uid://dio4mtjp1g1t1" path="res://Scripts/GameManager.gd" id="8_50glp"]
+[ext_resource type="Script" uid="uid://bjywwxmplwxyv" path="res://Scripts/NetworkManager.gd" id="9_netmgr"]
+[ext_resource type="PackedScene" path="res://Scenes/LobbyUI.tscn" id="10_lobby"]
+[ext_resource type="PackedScene" path="res://Scenes/SettingsUI.tscn" id="11_settings"]
+[ext_resource type="PackedScene" uid="uid://bmtjnfemn6vs4" path="res://Scenes/CardPreview.tscn" id="12_preview"]
+[ext_resource type="FontFile" uid="uid://bh0252bjv1o3m" path="res://Fonts/beaufort/BeaufortforLOL-Bold.ttf" id="13_frkhe"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_fos0i"]
+size = Vector2(126, 176)
+
+[node name="Main" type="Node2D" unique_id=1472749471]
+
+[node name="CardManager" type="Node2D" parent="." unique_id=78849771]
+script = ExtResource("1_rgh2o")
+
+[node name="TurnText" type="RichTextLabel" parent="CardManager" unique_id=2073115533]
+offset_left = 1430.0
+offset_top = 685.0
+offset_right = 1630.0
+offset_bottom = 735.0
+theme_override_font_sizes/normal_font_size = 32
+text = "Turn 0"
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ManaText" type="RichTextLabel" parent="CardManager" unique_id=1164499524]
+offset_left = 290.0
+offset_top = 685.0
+offset_right = 490.0
+offset_bottom = 735.0
+theme_override_font_sizes/normal_font_size = 28
+text = "Mana"
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="FlipFirstText" type="RichTextLabel" parent="CardManager" unique_id=417166399]
+offset_left = 150.0
+offset_top = 95.0
+offset_right = 350.0
+offset_bottom = 145.0
+theme_override_font_sizes/normal_font_size = 24
+text = "Priority: —"
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Button" type="Button" parent="CardManager" unique_id=1709342867]
+offset_left = 1695.0
+offset_top = 925.0
+offset_right = 1845.0
+offset_bottom = 975.0
+text = "End Turn"
+
+[node name="GameManager" type="Node2D" parent="." unique_id=1734828372]
+script = ExtResource("8_50glp")
+
+[node name="Board" type="Node2D" parent="." unique_id=1975552919]
+script = ExtResource("2_jw32o")
+card_slot_scene = ExtResource("2_pbw6q")
+
+[node name="PlayerHand" type="Node2D" parent="." unique_id=815204535]
+script = ExtResource("3_v1gob")
+
+[node name="Deck" type="Node2D" parent="." unique_id=389018412]
+position = Vector2(150, 950)
+script = ExtResource("4_v1gob")
+
+[node name="Area2D" type="Area2D" parent="Deck" unique_id=381913688]
+collision_layer = 4
+collision_mask = 4
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Deck/Area2D" unique_id=1285741635]
+shape = SubResource("RectangleShape2D_fos0i")
+
+[node name="Sprite2D" type="Sprite2D" parent="Deck" unique_id=1551086482]
+z_index = -2
+scale = Vector2(0.2, 0.2)
+texture = ExtResource("5_v1gob")
+
+[node name="RichTextLabel" type="RichTextLabel" parent="Deck" unique_id=1732475486]
+modulate = Color(0, 0, 0, 1)
+z_index = -2
+offset_left = -20.0
+offset_top = -120.0
+offset_right = 20.0
+offset_bottom = -80.0
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="InputManager" type="Node2D" parent="." unique_id=393387642]
+script = ExtResource("6_jw32o")
+
+[node name="NetworkManager" type="Node" parent="." unique_id=544351341]
+script = ExtResource("9_netmgr")
+
+[node name="LobbyUI" parent="." unique_id=1416146584 instance=ExtResource("10_lobby")]
+
+[node name="SettingsUI" parent="." unique_id=472448276 instance=ExtResource("11_settings")]
+
+[node name="CardPreview" parent="." unique_id=1129544455 instance=ExtResource("12_preview")]
+
+[node name="VictoryText" type="RichTextLabel" parent="." unique_id=2091700865]
+visible = false
+z_index = 150
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = 710.0
+offset_top = 440.0
+offset_right = 1210.0
+offset_bottom = 640.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(250, 100)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 24
+theme_override_fonts/normal_font = ExtResource("13_frkhe")
+theme_override_font_sizes/normal_font_size = 100
+text = "VICTORY"
+horizontal_alignment = 1
+vertical_alignment = 1
