@@ -72,7 +72,9 @@ func pick_random_lane_ids() -> Array:
 
 
 func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
-	"""Create and populate 3 lane scenes using the given lane ID list (index = column)."""
+	"""Create and populate 3 lane scenes using the given lane ID list (index = column).
+	Left lane (col 0) is fully revealed immediately.
+	Mid (col 1) and right (col 2) are hidden until turns 2 and 3 respectively."""
 	if not lane_scene:
 		return
 
@@ -91,7 +93,15 @@ func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
 		var lane_id: String = str(ordered_lane_ids[col]) if col < ordered_lane_ids.size() else "1"
 		var lane_data: Dictionary = LaneDatabase.LANES.get(lane_id, {})
 		lane_data_by_col[col] = lane_data
-		_apply_lane_visuals(lane_instance, lane_data)
+
+		if col == 0:
+			_apply_lane_visuals(lane_instance, lane_data)
+		else:
+			var reveal_turn := col + 1  # col 1 → turn 2, col 2 → turn 3
+			_apply_lane_visuals_hidden(lane_instance, reveal_turn)
+
+	# Inform LaneManager of the lane assignment so it can track reveals and effects
+	LaneManager.setup_lanes(ordered_lane_ids)
 
 
 func _get_appearable_lane_ids() -> Array:
@@ -101,6 +111,33 @@ func _get_appearable_lane_ids() -> Array:
 		if bool(lane_data.get("Appearable", false)):
 			lane_ids.append(str(lane_id))
 	return lane_ids
+
+
+func _apply_lane_visuals_hidden(lane_instance: Node, reveal_turn: int) -> void:
+	"""Apply placeholder visuals to a lane that hasn't been revealed yet."""
+	if not lane_instance:
+		return
+
+	var lane_name_node := lane_instance.get_node_or_null("LaneName")
+	if lane_name_node and "text" in lane_name_node:
+		lane_name_node.text = ""
+
+	var lane_desc_node := lane_instance.get_node_or_null("LaneDesc")
+	if lane_desc_node and "text" in lane_desc_node:
+		lane_desc_node.text = "Will be revealed on turn %d" % reveal_turn
+
+	var lane_sprite_node := lane_instance.get_node_or_null("LaneBase/LaneSprite")
+	if lane_sprite_node and "texture" in lane_sprite_node:
+		lane_sprite_node.texture = null
+
+
+func reveal_lane_visuals(col: int) -> void:
+	"""Called by LaneManager when a hidden lane becomes revealed.
+	Applies full name, sprite, and description to the lane scene."""
+	var lane_instance = lane_nodes_by_col.get(col)
+	var lane_data: Dictionary = lane_data_by_col.get(col, {})
+	if lane_instance and is_instance_valid(lane_instance):
+		_apply_lane_visuals(lane_instance, lane_data)
 
 
 func _apply_lane_visuals(lane_instance: Node, lane_data: Dictionary) -> void:

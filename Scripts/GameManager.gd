@@ -172,6 +172,9 @@ func begin_round_start() -> void:
 	# Default behavior: refill all players each new turn.
 	_refill_all_players_mana()
 
+	# Lane reveal and round-start lane mechanics (fires BEFORE card abilities)
+	await LaneManager.on_round_start(turn_number)
+
 	# Trigger Round Start abilities in play order
 	if card_manager and card_manager.has_method("trigger_round_start_abilities"):
 		await card_manager.trigger_round_start_abilities()
@@ -246,7 +249,10 @@ func _proceed_to_resolve() -> void:
 	# Trigger Round End abilities in play order (respects flip first)
 	if card_manager and card_manager.has_method("trigger_round_end_abilities"):
 		await card_manager.trigger_round_end_abilities()
-	
+
+	# Lane round-end effects (Ornn's Forge, Sunken Temple) — fire AFTER card abilities
+	await LaneManager.on_round_end(turn_number)
+
 	# Update zone power again after round end abilities
 	_update_zone_power_display()
 	

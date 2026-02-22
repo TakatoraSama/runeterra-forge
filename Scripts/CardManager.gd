@@ -98,6 +98,12 @@ func finish_drag():
 				_return_card_to_hand()
 				return
 
+		# Check lane placement restriction (e.g. Noxkraya Arena turn 5)
+		if LaneManager.is_placement_restricted(zone_key):
+			print("Cards must be played in the active lane this turn (Noxkraya Arena)!")
+			_return_card_to_hand()
+			return
+
 		# Validate it's currently PLAY phase (turn system)
 		if game_manager_reference and game_manager_reference.has_method("is_play_phase"):
 			if not game_manager_reference.is_play_phase():

@@ -327,6 +327,20 @@ const CARDS = {
 		"AbilityType": "mana_ramp",
 		"BalanceValues": {"mana_bonus": 5},
 		"PreviewTooltip": [31, 32, 33]
+	},
+	"38": {
+		"Name": "Chip",
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Chip.webp",
+		"Cost": 1,
+		"Power": 1,
+		"Keyword": "",
+		"Skill": '"Snow on my feat! Rain on my head!"',
+		"AbilityType": "none",
+		"BalanceValues": {},
+		"PreviewTooltip": [38]
 	}
 }
 
