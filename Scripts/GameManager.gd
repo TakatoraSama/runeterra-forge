@@ -17,6 +17,7 @@ enum RoundPhase {
 	NONE,
 	ROUND_START,
 	PLAY,
+	SWAP_LANE,
 	RESOLVE,
 	ROUND_END,
 }
@@ -237,7 +238,10 @@ func _on_player_end_turn(peer_id: int) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func _proceed_to_resolve() -> void:
-	"""All players ended turn, proceed to resolve phase"""
+	"""All players ended turn, proceed to swap lane phase then resolve phase"""
+	_set_round_phase(RoundPhase.SWAP_LANE)
+	await _swap_lane_phase()
+
 	_set_round_phase(RoundPhase.RESOLVE)
 	await _resolve_phase()
 	
@@ -260,6 +264,34 @@ func _proceed_to_resolve() -> void:
 	check_lane_winners_and_update_flip_first()
 	
 	start_next_turn()
+
+
+func _swap_lane_phase() -> void:
+	"""Execute all pending Elusive swap-lane moves before resolve.
+	Cards played this turn are hidden during the swap animation so only
+	previously-resolved cards (the swapping ones) are visible."""
+	# Hide cards played this turn — they will be revealed normally in RESOLVE
+	var hidden_cards: Array = []
+	if card_manager and "played_cards_order" in card_manager:
+		for card in card_manager.played_cards_order:
+			if is_instance_valid(card):
+				card.visible = false
+				hidden_cards.append(card)
+
+	# Apply opponent swaps that were queued during PLAY phase
+	if card_manager and card_manager.has_method("apply_pending_opponent_swaps"):
+		card_manager.apply_pending_opponent_swaps()
+
+	# Run swap animations (snap to origin, then tween to destination)
+	await SwapLaneManager.execute_swaps()
+
+	# Restore visibility so RESOLVE phase can show them face-down as normal
+	for card in hidden_cards:
+		if is_instance_valid(card):
+			card.visible = true
+
+	if card_manager and card_manager.has_method("_notify_zone_power_changed"):
+		card_manager._notify_zone_power_changed()
 
 
 func _resolve_phase() -> void:

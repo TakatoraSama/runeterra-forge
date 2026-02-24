@@ -58,7 +58,7 @@ const KEYWORDS = {
 		"Positive": true
 	},
 	"Elusive": {
-		"Description": "While this keyword is active, you can {swap} my lane. Inactivate this keyword once you swap.",
+		"Description": "Each round, You can {swap lane} me.",
 		"Sprite": "res://Assets/KeywordSprites/Elusive.webp",
 		"Stackable": false,
 		"Generatable": true,

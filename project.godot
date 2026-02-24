@@ -21,6 +21,7 @@ AbilityResolver="*res://Scripts/AbilityResolver.gd"
 LevelUpManager="*res://Scripts/LevelUpManager.gd"
 AuraSystem="*res://Scripts/AuraSystem.gd"
 LaneManager="*res://Scripts/LaneManager.gd"
+SwapLaneManager="*res://Scripts/SwapLaneManager.gd"
 
 [display]
 

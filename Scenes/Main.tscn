@@ -64,12 +64,6 @@ text = "End Turn"
 
 [node name="GameManager" type="Node2D" parent="." unique_id=1734828372]
 script = ExtResource("8_50glp")
-max_turns = null
-player_count = null
-starting_player_id = null
-initial_draw_count = null
-draw_per_turn = null
-mana_indicator_player_id = null
 
 [node name="Board" type="Node2D" parent="." unique_id=1975552919]
 script = ExtResource("2_jw32o")

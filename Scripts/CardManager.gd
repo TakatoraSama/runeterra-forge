@@ -27,6 +27,10 @@ var summoned_cards: Array = []  # Tracks all cards that entered the board [{card
 var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
 var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
+var _is_swap_drag: bool = false           # True when dragging an Elusive board card for a lane swap
+var _swap_drag_origin_slot = null         # The slot the Elusive card came from
+var _swap_drag_origin_zone: Vector2i = Vector2i(-1, -1)  # The zone the Elusive card came from
+var _pending_opponent_swaps: Array = []  # Deferred opponent swap data [{card_id, from_col, to_col}] — applied at SWAP_LANE phase
 
 
 # Lightweight proxy for opponent hand cards that don't exist as scene nodes on this client.
@@ -72,6 +76,27 @@ func start_drag(card):
 	if game_manager_reference and game_manager_reference.has_method("is_play_phase"):
 		if not game_manager_reference.is_play_phase():
 			return
+
+	if card.card_slot_is_in:
+		# Board card: only resolved Elusive cards owned by the local player can be swap-dragged
+		if not card.is_resolved:
+			return
+		if not _has_elusive_keyword(card):
+			return
+		if card.owner_player_id != current_player_id:
+			return
+		if SwapLaneManager.has_pending_swap(card):
+			return
+		# Initiate swap drag: temporarily free the origin slot
+		_is_swap_drag = true
+		_swap_drag_origin_slot = card.card_slot_is_in
+		_swap_drag_origin_zone = board_reference.get_zone_for_slot(_swap_drag_origin_slot)
+		_swap_drag_origin_slot.card_in_slot = false
+		card.card_slot_is_in = null
+		board_reference.remove_card_from_zone(_swap_drag_origin_zone, card)
+	else:
+		_is_swap_drag = false
+
 	card_being_dragged = card
 	card.scale = Vector2(DEFAULT_CARD_SCALE, DEFAULT_CARD_SCALE)
 	card.z_index = 10
@@ -84,11 +109,77 @@ func _return_card_to_hand():
 	card_being_dragged = null
 
 func cancel_active_drag() -> void:
-	"""Cancel any card currently being dragged and return it to hand."""
+	"""Cancel any card currently being dragged and return it to hand (or origin slot for swap drags)."""
 	if card_being_dragged:
-		_return_card_to_hand()
+		if _is_swap_drag:
+			_return_swap_card_to_origin()
+		else:
+			_return_card_to_hand()
+
+func _has_elusive_keyword(card) -> bool:
+	"""Return true if this card has the Elusive keyword."""
+	var card_data = CardDatabase.CARDS.get(str(card.card_id), null)
+	if not card_data:
+		return false
+	return "Elusive" in card_data.get("Keyword", [])
+
+
+func _finish_swap_drag() -> void:
+	"""Handle releasing a swap drag. Validates the destination and either registers
+	the swap (card moves to dest slot temporarily) or cancels (card snaps to origin)."""
+	_is_swap_drag = false
+	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
+	if dest_slot:
+		var dest_zone = board_reference.get_zone_for_slot(dest_slot)
+		# Valid destination: same player row, different column, owned by local player
+		if dest_zone != Vector2i(-1, -1) \
+				and dest_zone.y == _swap_drag_origin_zone.y \
+				and dest_zone.x != _swap_drag_origin_zone.x \
+				and board_reference.is_zone_owned_by_player(dest_zone, current_player_id):
+			# Move card to destination temporarily (animate at SWAP_LANE phase)
+			card_being_dragged.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+			card_being_dragged.card_slot_is_in = dest_slot
+			dest_slot.card_in_slot = true
+			board_reference.add_card_to_zone(dest_zone, card_being_dragged)
+			card_being_dragged.position = dest_slot.position
+			card_being_dragged.z_index = CARD_BOARD_Z_INDEX
+			var card_id_str: String = card_being_dragged.card_id
+			var from_col: int = _swap_drag_origin_zone.x
+			var to_col: int = dest_zone.x
+			SwapLaneManager.register_swap(
+				card_being_dragged,
+				_swap_drag_origin_zone, _swap_drag_origin_slot,
+				dest_zone, dest_slot,
+				current_player_id
+			)
+			if _is_online():
+				rpc("_receive_opponent_swap", card_id_str, from_col, to_col)
+			card_being_dragged = null
+			_swap_drag_origin_slot = null
+			_swap_drag_origin_zone = Vector2i(-1, -1)
+			return
+	# Invalid destination — return card to its origin slot
+	_return_swap_card_to_origin()
+
+
+func _return_swap_card_to_origin() -> void:
+	"""Snap the swap-dragged card back to its origin slot without any tween."""
+	card_being_dragged.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+	_swap_drag_origin_slot.card_in_slot = true
+	card_being_dragged.card_slot_is_in = _swap_drag_origin_slot
+	board_reference.add_card_to_zone(_swap_drag_origin_zone, card_being_dragged)
+	card_being_dragged.position = _swap_drag_origin_slot.position
+	card_being_dragged.z_index = CARD_BOARD_Z_INDEX
+	card_being_dragged = null
+	_is_swap_drag = false
+	_swap_drag_origin_slot = null
+	_swap_drag_origin_zone = Vector2i(-1, -1)
+
 
 func finish_drag():
+	if _is_swap_drag:
+		_finish_swap_drag()
+		return
 	var card_slot_found = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	if card_slot_found:
 		# Check zone ownership before placing
@@ -131,7 +222,8 @@ func finish_drag():
 		card_being_dragged.card_slot_is_in = card_slot_found
 		player_hand_reference.remove_card_from_hand(card_being_dragged)
 		card_being_dragged.position = card_slot_found.position
-		card_being_dragged.get_node("Area2D/CollisionShape2D").disabled = true
+		if not _has_elusive_keyword(card_being_dragged):
+			card_being_dragged.get_node("Area2D/CollisionShape2D").disabled = true
 		card_slot_found.card_in_slot = true
 		
 		# Set card ownership
@@ -518,6 +610,65 @@ func _receive_opponent_card_play(card_id: String, zone_col: int, zone_row: int) 
 		"zone_row": zone_row
 	})
 	print("Opponent card play queued: ", card_id, " for zone: ", Vector2i(zone_col, zone_row))
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_swap(card_id: String, from_col: int, to_col: int) -> void:
+	"""Queue opponent's lane swap for deferred application at SWAP_LANE phase start.
+	We do NOT move the card during PLAY phase so the local player never sees the
+	opponent's card jump to a new lane before the swap animation plays."""
+	_pending_opponent_swaps.append({"card_id": card_id, "from_col": from_col, "to_col": to_col})
+	print("Opponent swap queued: '%s' col %d → col %d (applied at SWAP_LANE phase)" % [card_id, from_col, to_col])
+
+
+func apply_pending_opponent_swaps() -> void:
+	"""Move each queued opponent card to its destination slot and register the swap.
+	Called at the very start of SWAP_LANE phase, before execute_swaps() runs."""
+	for data in _pending_opponent_swaps:
+		var card_id: String = data["card_id"]
+		var from_zone := Vector2i(data["from_col"], 0)  # opponent is always row 0 from our view
+		var to_zone   := Vector2i(data["to_col"],   0)
+
+		# Find the opponent's card in from_zone
+		var card_to_swap = null
+		for c in board_reference.get_cards_in_zone(from_zone):
+			if is_instance_valid(c) and c.card_id == card_id:
+				card_to_swap = c
+				break
+
+		if not card_to_swap:
+			print("apply_pending_opponent_swaps: card '%s' not found in zone %s" % [card_id, str(from_zone)])
+			continue
+
+		var from_slot = card_to_swap.card_slot_is_in
+		if not from_slot:
+			print("apply_pending_opponent_swaps: card '%s' has no slot" % card_id)
+			continue
+
+		# Find a free slot in the destination zone
+		var dest_slot = null
+		for slot in board_reference.slots_by_zone.get(to_zone, []):
+			if not slot.card_in_slot:
+				dest_slot = slot
+				break
+
+		if not dest_slot:
+			print("apply_pending_opponent_swaps: no free slot in zone %s for '%s'" % [str(to_zone), card_id])
+			continue
+
+		# Move card to destination so execute_swaps() can snap it back then tween forward
+		board_reference.remove_card_from_zone(from_zone, card_to_swap)
+		from_slot.card_in_slot = false
+		card_to_swap.card_slot_is_in = dest_slot
+		dest_slot.card_in_slot = true
+		board_reference.add_card_to_zone(to_zone, card_to_swap)
+		card_to_swap.position = dest_slot.position
+
+		# Register so execute_swaps() includes this card
+		SwapLaneManager.register_swap(card_to_swap, from_zone, from_slot, to_zone, dest_slot, 0)
+		print("Opponent swap applied: '%s' zone %s → zone %s" % [card_id, str(from_zone), str(to_zone)])
+
+	_pending_opponent_swaps.clear()
 
 
 func _spawn_pending_opponent_cards() -> void:
