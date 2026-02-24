@@ -9,6 +9,9 @@
 [ext_resource type="Texture2D" uid="uid://cyswtmykbvy6q" path="res://Assets/CardComponent/card_shadow.png" id="4_13sua"]
 [ext_resource type="Texture2D" uid="uid://mm1v4a2bbm1j" path="res://Assets/CardSprites/Azir1.webp" id="4_kphy1"]
 [ext_resource type="Texture2D" uid="uid://b3083uwjpmuru" path="res://Assets/CardComponent/card_sprite.png" id="5_pbuqb"]
+[ext_resource type="Texture2D" uid="uid://catn6u3bju6aq" path="res://Assets/RegionSprites/BandleCity.webp" id="5_swj2d"]
+[ext_resource type="FontFile" uid="uid://judjfn8jbev8" path="res://Fonts/univers/UniversRegular.ttf" id="5_tayg5"]
+[ext_resource type="Texture2D" uid="uid://l6ejijhshnj8" path="res://Assets/RegionSprites/Ionia.webp" id="6_co2vc"]
 [ext_resource type="Texture2D" uid="uid://ckw3hpgqkawwc" path="res://Assets/CardComponent/card_base.png" id="6_f3ywt"]
 [ext_resource type="Texture2D" uid="uid://crcvh2u0r7tia" path="res://Assets/CardComponent/card_back.png" id="7_6elyo"]
 [ext_resource type="Texture2D" uid="uid://bd0tplng2qlmo" path="res://Assets/CardComponent/card_subtype.png" id="8_swj2d"]
@@ -20,12 +23,10 @@ size = Vector2(630, 880)
 base_font = ExtResource("2_pbuqb")
 
 [sub_resource type="FontVariation" id="FontVariation_gnfes"]
-base_font = ExtResource("3_gnfes")
-spacing_top = -8
+base_font = ExtResource("5_tayg5")
 
 [sub_resource type="FontVariation" id="FontVariation_swj2d"]
-base_font = ExtResource("3_gnfes")
-spacing_top = -8
+base_font = ExtResource("5_tayg5")
 
 [sub_resource type="Gradient" id="Gradient_6elyo"]
 colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1)
@@ -498,12 +499,12 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -275.0
-offset_top = 200.0
+offset_top = 44.0
 offset_right = 275.0
 offset_bottom = 405.0
 grow_horizontal = 2
 grow_vertical = 0
-theme_override_constants/separation = 2
+theme_override_constants/separation = 14
 
 [node name="CardName" type="RichTextLabel" parent="CardFront/TextContainer" unique_id=73561908]
 z_index = -5
@@ -514,8 +515,7 @@ theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 5
 theme_override_fonts/normal_font = ExtResource("2_pbuqb")
 theme_override_fonts/bold_font = SubResource("FontVariation_6elyo")
-theme_override_font_sizes/normal_font_size = 70
-theme_override_font_sizes/bold_font_size = 70
+theme_override_font_sizes/normal_font_size = 64
 bbcode_enabled = true
 text = "Name"
 fit_content = true
@@ -523,13 +523,19 @@ scroll_active = false
 horizontal_alignment = 1
 vertical_alignment = 1
 
+[node name="KeywordContainer" type="HBoxContainer" parent="CardFront/TextContainer" unique_id=1623630910]
+z_index = -5
+layout_mode = 2
+theme_override_constants/separation = 64
+alignment = 1
+
 [node name="Skill" type="RichTextLabel" parent="CardFront/TextContainer" unique_id=690361111]
 z_index = -5
 clip_contents = false
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_constants/outline_size = 5
+theme_override_constants/outline_size = 3
 theme_override_fonts/normal_font = SubResource("FontVariation_gnfes")
 theme_override_font_sizes/normal_font_size = 36
 bbcode_enabled = true
@@ -552,15 +558,35 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_colors/default_color = Color(1, 0.63529414, 0.39607844, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_constants/outline_size = 5
+theme_override_constants/outline_size = 3
 theme_override_fonts/normal_font = SubResource("FontVariation_swj2d")
 theme_override_font_sizes/normal_font_size = 36
 bbcode_enabled = true
-text = "Level Up"
+text = "Level up condition"
 fit_content = true
 scroll_active = false
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="RegionContainer" type="HBoxContainer" parent="CardFront/TextContainer" unique_id=1089248269]
+z_index = -5
+layout_mode = 2
+theme_override_constants/separation = -8
+alignment = 1
+
+[node name="Region1" type="TextureRect" parent="CardFront/TextContainer/RegionContainer" unique_id=2029805549]
+modulate = Color(1, 1, 1, 0.7058824)
+custom_minimum_size = Vector2(96, 96)
+layout_mode = 2
+texture = ExtResource("5_swj2d")
+expand_mode = 5
+
+[node name="Region2" type="TextureRect" parent="CardFront/TextContainer/RegionContainer" unique_id=472104214]
+modulate = Color(1, 1, 1, 0.7058824)
+custom_minimum_size = Vector2(96, 96)
+layout_mode = 2
+texture = ExtResource("6_co2vc")
+expand_mode = 5
 
 [node name="CardMana" type="Sprite2D" parent="CardFront" unique_id=2021904266]
 z_index = -6

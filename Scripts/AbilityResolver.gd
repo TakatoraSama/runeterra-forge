@@ -681,9 +681,9 @@ func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 	var card_scene = preload("res://Scenes/Card.tscn")
 	var sun_disc   = card_scene.instantiate()
 
-	sun_disc.card_id          = "29"
+	sun_disc.card_id          = "BuriedSunDisc"
 	sun_disc.owner_player_id  = owner_player_id
-	CardDatabase.populate_card_visuals(sun_disc, CardDatabase.CARDS["29"])
+	CardDatabase.populate_card_visuals(sun_disc, CardDatabase.CARDS["BuriedSunDisc"])
 
 	sun_disc.position                                        = available_slot.position
 	sun_disc.scale                                           = Vector2(0.15, 0.15)
@@ -704,7 +704,7 @@ func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 	# Multiplayer: notify opponent (mirror the zone row from our side to theirs)
 	if _is_online():
 		var mirrored: Vector2i = Vector2i(mid_zone.x, 1 - mid_zone.y)
-		rpc("_receive_opponent_game_start_summon", "29", mirrored.x, mirrored.y)
+		rpc("_receive_opponent_game_start_summon", "BuriedSunDisc", mirrored.x, mirrored.y)
 
 
 @rpc("any_peer", "reliable")

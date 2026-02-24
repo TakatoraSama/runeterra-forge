@@ -1,0 +1,36 @@
+[gd_scene format=3 uid="uid://cfhhnn7d3wdnf"]
+
+[ext_resource type="Texture2D" uid="uid://chaqfl5ssg2se" path="res://Assets/CardComponent/card_keyword.png" id="1_kwbg"]
+[ext_resource type="Texture2D" uid="uid://dk6cqwl28uy0w" path="res://Assets/KeywordSprites/Elusive.webp" id="2_krjn5"]
+
+[node name="KeywordItem" type="Control" unique_id=1979124775]
+custom_minimum_size = Vector2(84, 72)
+layout_mode = 3
+anchors_preset = 0
+
+[node name="KeywordBG" type="TextureRect" parent="." unique_id=1932402648]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_kwbg")
+expand_mode = 5
+
+[node name="KeywordSprite" type="TextureRect" parent="." unique_id=1130007994]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -24.0
+offset_top = -24.0
+offset_right = 24.0
+offset_bottom = 24.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_krjn5")
+expand_mode = 2
+stretch_mode = 6

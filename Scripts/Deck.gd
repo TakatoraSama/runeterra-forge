@@ -3,9 +3,9 @@ extends Node2D
 const CARD_SCENE_PATH = "res://Scenes/Card.tscn"
 const CARD_DRAW_SPEED = 0.2
 
-# var player_deck = ["1", "2", "3", "4", "9", "31", "2", "2", "3", "4", "9", "31"]
-var player_deck = ["1", "2", "3", "4", "9", "31"]
-# var player_deck = ["25", "26", "27", "28", "9", "31"]
+# var player_deck = ["Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1", "Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1"]
+var player_deck = ["Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1", "Ahri1", "Kennen1"]
+# var player_deck = ["Azir3", "Renekton3", "Nasus3", "Xerath3", "Tryndamere1", "Trundle1"]
 var owner_player_id: int = 1  # Which player owns this deck (1 = bottom/local)
 
 

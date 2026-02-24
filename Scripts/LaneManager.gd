@@ -183,9 +183,9 @@ func _activate_hexcore_foundry() -> void:
 
 
 func _activate_rockfall_path(col: int) -> void:
-	"""Rockfall Path: summon Chip (card '38') for both players in this lane column."""
+	"""Rockfall Path: summon Chip (card 'Chip') for both players in this lane column."""
 	for player_id in range(2):
-		_summon_card_in_lane("38", col, player_id)
+		_summon_card_in_lane("Chip", col, player_id)
 	# Refresh power labels after placing cards
 	var cm := _get_card_manager()
 	if cm and cm.has_method("_notify_zone_power_changed"):

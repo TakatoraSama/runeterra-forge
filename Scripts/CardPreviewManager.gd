@@ -113,43 +113,7 @@ func _populate(preview: Node, card_id: String, source: Node = null) -> void:
 	if card_data.is_empty():
 		return
 
-	# ── Text fields ────────────────────────────────────────────────────────
-	preview.get_node("CardFront/TextContainer/CardName").text = \
-		str(card_data.get("Name", ""))
-
-	preview.get_node("CardFront/Cost").text = str(card_data.get("Cost", 0))
-	CardDatabase.apply_power_visual(preview, card_data, source)
-
-	preview.get_node("CardFront/TextContainer/Skill").text = \
-		CardDatabase.format_card_text(str(card_data.get("Skill", "")), card_data.get("BalanceValues", {}))
-
-	var level_up_text: String = str(card_data.get("LevelUp", ""))
-	var level_up_label := preview.get_node("CardFront/TextContainer/LevelUp")
-	var level_sep := preview.get_node("CardFront/TextContainer/LevelSeperator")
-	if level_up_text != "":
-		level_up_label.text = CardDatabase.format_card_text(level_up_text, card_data.get("BalanceValues", {}))
-		level_up_label.visible = true
-		level_sep.visible = true
-	else:
-		level_up_label.visible = false
-		level_sep.visible = false
-
-	# ── Sprite ─────────────────────────────────────────────────────────────
-	var sprite_path: String = str(card_data.get("Sprite", ""))
-	if sprite_path != "":
-		var tex = ResourceLoader.load(sprite_path)
-		if tex:
-			preview.get_node("CardFront/CardSpriteParent/CardSprite").texture = tex
-
-	# ── SubType badge ──────────────────────────────────────────────────────
-	var sub_type: String = str(card_data.get("SubType", ""))
-	if sub_type != "":
-		preview.get_node("CardFront/SubType").text = sub_type.to_upper()
-		preview.get_node("CardFront/SubType").visible = true
-		preview.get_node("CardFront/CardSubType").visible = true
-	else:
-		preview.get_node("CardFront/SubType").visible = false
-		preview.get_node("CardFront/CardSubType").visible = false
+	CardDatabase.populate_card_visuals(preview, card_data, source)
 
 	# ── Show front, hide back ───────────────────────────────────────────────
 	var card_back := preview.get_node_or_null("CardBack")

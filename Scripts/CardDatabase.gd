@@ -2,8 +2,9 @@ class_name CardDatabase
 
 const CARDS = {
 	# Champions - Azir Line
-	"1": {
+	"Azir1": {
 		"Name": "Azir",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": true,
@@ -14,13 +15,14 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "{Game Start}: Summon a [Buried Sun Disc] at mid lane.",
 		"LevelUp": "I've seen {ally_threshold}+ other allies or landmarks in play.",
-		"LevelUpTo": "13",
+		"LevelUpTo": "Azir2",
 		"AbilityType": "summon_sun_disc",
 		"BalanceValues": {"ally_threshold": 6},
-		"PreviewTooltip": [1, 13, 25, 29, 30]
+		"PreviewTooltip": ["Azir1", "Azir2", "Azir3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"13": {
+	"Azir2": {
 		"Name": "Azir",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -31,13 +33,14 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "{Aura}: Your other Ascended allies in play have +{aura_power} Power.",
 		"LevelUp": "You've {restored the Sun Disc}.",
-		"LevelUpTo": "25",
+		"LevelUpTo": "Azir3",
 		"AbilityType": "aura_ascended_buff",
 		"BalanceValues": {"aura_power": 2},
-		"PreviewTooltip": [1, 13, 25, 29, 30]
+		"PreviewTooltip": ["Azir1", "Azir2", "Azir3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"25": {
+	"Azir3": {
 		"Name": "Azir",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -51,12 +54,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "aura_ascended_buff",
 		"BalanceValues": {"aura_power": 2},
-		"PreviewTooltip": [1, 13, 25, 29, 30]
+		"PreviewTooltip": ["Azir1", "Azir2", "Azir3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
 	
 	# Champions - Renekton Line
-	"2": {
+	"Renekton1": {
 		"Name": "Renekton",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": true,
@@ -67,13 +71,14 @@ const CARDS = {
 		"Keyword": ["Challenger"],
 		"Skill": "{Round Start}: Grant me +{win_power} Power if you're winning here.",
 		"LevelUp": "I've increased my Power by {power_threshold}+.",
-		"LevelUpTo": "14",
+		"LevelUpTo": "Renekton2",
 		"AbilityType": "conditional_buff",
 		"BalanceValues": {"win_power": 2, "power_threshold": 4},
-		"PreviewTooltip": [2, 14, 26, 29, 30]
+		"PreviewTooltip": ["Renekton1", "Renekton2", "Renekton3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"14": {
+	"Renekton2": {
 		"Name": "Renekton",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -84,13 +89,14 @@ const CARDS = {
 		"Keyword": ["Challenger"],
 		"Skill": "{Round Start}: Grant me +{win_power} Power if you're winning here.",
 		"LevelUp": "You've {restored the Sun Disc}.",
-		"LevelUpTo": "26",
+		"LevelUpTo": "Renekton3",
 		"AbilityType": "conditional_buff",
 		"BalanceValues": {"win_power": 3},
-		"PreviewTooltip": [2, 14, 26, 29, 30]
+		"PreviewTooltip": ["Renekton1", "Renekton2", "Renekton3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"26": {
+	"Renekton3": {
 		"Name": "Renekton",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -104,12 +110,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "conditional_buff",
 		"BalanceValues": {"win_power": 3, "enemy_debuff": 3},
-		"PreviewTooltip": [2, 14, 26, 29, 30]
+		"PreviewTooltip": ["Renekton1", "Renekton2", "Renekton3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
 	
 	# Champions - Nasus Line
-	"3": {
+	"Nasus1": {
 		"Name": "Nasus",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": true,
@@ -120,13 +127,14 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "{Round End}: Kills the weakest ally here and grant me +{kill_power} Power.",
 		"LevelUp": "You've killed {kill_threshold}+ units.",
-		"LevelUpTo": "15",
+		"LevelUpTo": "Nasus2",
 		"AbilityType": "kill_ally_buff",
 		"BalanceValues": {"kill_power": 2, "kill_threshold": 2},
-		"PreviewTooltip": [3, 15, 27, 29, 30]
+		"PreviewTooltip": ["Nasus1", "Nasus2", "Nasus3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"15": {
+	"Nasus2": {
 		"Name": "Nasus",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -137,13 +145,14 @@ const CARDS = {
 		"Keyword": ["Fearsome"],
 		"Skill": "{Round End}: Kills the weakest ally here and grant me +{kill_power} Power.",
 		"LevelUp": "You've {restored the Sun Disc}.",
-		"LevelUpTo": "27",
+		"LevelUpTo": "Nasus3",
 		"AbilityType": "kill_ally_buff",
 		"BalanceValues": {"kill_power": 3},
-		"PreviewTooltip": [3, 15, 27, 29, 30]
+		"PreviewTooltip": ["Nasus1", "Nasus2", "Nasus3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"27": {
+	"Nasus3": {
 		"Name": "Nasus",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -157,12 +166,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "kill_ally_buff",
 		"BalanceValues": {"kill_power": 3},
-		"PreviewTooltip": [3, 15, 27, 29, 30]
+		"PreviewTooltip": ["Nasus1", "Nasus2", "Nasus3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
 	
 	# Champions - Xerath Line
-	"4": {
+	"Xerath1": {
 		"Name": "Xerath",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": true,
@@ -173,13 +183,14 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "{Play}: Drain {drain_power} Power from other units here.",
 		"LevelUp": "I've seen {ally_threshold}+ allies in play with increased power.",
-		"LevelUpTo": "16",
+		"LevelUpTo": "Xerath2",
 		"AbilityType": "drain_power",
 		"BalanceValues": {"drain_power": 2, "ally_threshold": 4},
-		"PreviewTooltip": [4, 16, 28, 29, 30]
+		"PreviewTooltip": ["Xerath1", "Xerath2", "Xerath3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"16": {
+	"Xerath2": {
 		"Name": "Xerath",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -190,13 +201,14 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "{Aura}: Back-row enemies here have -{aura_debuff} Power.",
 		"LevelUp": "You've {restored the Sun Disc}.",
-		"LevelUpTo": "28",
+		"LevelUpTo": "Xerath3",
 		"AbilityType": "aura_debuff",
 		"BalanceValues": {"aura_debuff": 1},
-		"PreviewTooltip": [4, 16, 28, 29, 30]
+		"PreviewTooltip": ["Xerath1", "Xerath2", "Xerath3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"28": {
+	"Xerath3": {
 		"Name": "Xerath",
+		"Region": ["Shurima"],
 		"Type": "Champion",
 		"SubType": "Ascended",
 		"Collectible": false,
@@ -210,12 +222,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "aura_debuff",
 		"BalanceValues": {"aura_debuff": 1},
-		"PreviewTooltip": [4, 16, 28, 29, 30]
+		"PreviewTooltip": ["Xerath1", "Xerath2", "Xerath3", "BuriedSunDisc", "RestoredSunDisc"]
 	},
 	
 	# Champions - Tryndamere Line
-	"9": {
+	"Tryndamere1": {
 		"Name": "Tryndamere",
+		"Region": ["Freljord"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": true,
@@ -226,12 +239,13 @@ const CARDS = {
 		"Keyword": [],
 		"Skill": "",
 		"LevelUp": "If I would die, I Level Up instead.",
-		"LevelUpTo": "21",
+		"LevelUpTo": "Tryndamere2",
 		"AbilityType": "levelup_on_death",
-		"PreviewTooltip": [9, 21]
+		"PreviewTooltip": ["Tryndamere1", "Tryndamere2"]
 	},
-	"21": {
+	"Tryndamere2": {
 		"Name": "Tryndamere",
+		"Region": ["Freljord"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": false,
@@ -245,12 +259,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "survive_death",
 		"BalanceValues": {"survive_power": 2},
-		"PreviewTooltip": [9, 21]
+		"PreviewTooltip": ["Tryndamere1", "Tryndamere2"]
 	},
 	
 	# Champions - Trundle Line
-	"31": {
+	"Trundle1": {
 		"Name": "Trundle",
+		"Region": ["Freljord"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": true,
@@ -258,15 +273,16 @@ const CARDS = {
 		"Level": 1,
 		"Cost": 3,
 		"Power": 3,
-		"Keyword": ["Regeneration"],
+		"Keyword": [],
 		"Skill": "{Play}: Create an [Ice Pillar] in hand.",
 		"LevelUp": "You've played an [Ice Pillar].",
-		"LevelUpTo": "32",
+		"LevelUpTo": "Trundle2",
 		"AbilityType": "create_card",
-		"PreviewTooltip": [31, 32, 33]
+		"PreviewTooltip": ["Trundle1", "Trundle2", "IcePillar"]
 	},
-	"32": {
+	"Trundle2": {
 		"Name": "Trundle",
+		"Region": ["Freljord"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": false,
@@ -280,12 +296,89 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "conditional_buff",
 		"BalanceValues": {"behold_power": 2, "mana_threshold": 5},
-		"PreviewTooltip": [31, 32, 33]
+		"PreviewTooltip": ["Trundle1", "Trundle2", "IcePillar"]
+	},
+
+	# Champions - Ahri line
+	"Ahri1": {
+		"Name": "Ahri",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Ahri1.webp",
+		"Level": 1,
+		"Cost": 1,
+		"Power": 2,
+		"Keyword": ["Elusive"],
+		"Skill": "Each round, when I {swap lanes}, {recall} the weakest ally here.",
+		"LevelUp": "I've recalled {recall_threshold}+ allies.",
+		"LevelUpTo": "Ahri2",
+		"AbilityType": "",
+		"BalanceValues": {"recall_threshold": 3},
+		"PreviewTooltip": ["Ahri1", "Ahri2"]
+	},
+	"Ahri2": {
+		"Name": "Ahri",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Ahri2.webp",
+		"Level": 2,
+		"Cost": 1,
+		"Power": 3,
+		"Keyword": ["Elusive"],
+		"Skill": "Each round, when I swap lanes, recall the weakest ally here and reduce its cost by {recall_cost_reduction}.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"recall_cost_reduction": 1},
+		"PreviewTooltip": ["Ahri1", "Ahri2"]
+	},
+
+	# Champions - Kennen line
+	"Kennen1": {
+		"Name": "Kennen",
+		"Region": ["Bandle City","Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Kennen1.webp",
+		"Level": 1,
+		"Cost": 1,
+		"Power": 1,
+		"Keyword": [],
+		"Skill": "{Play}: Stun an enemy here.",
+		"LevelUp": "You've sumomoned the same ally {summon_threshold}+ times.",
+		"LevelUpTo": "Kennen2",
+		"AbilityType": "",
+		"BalanceValues": {"summon_threshold": 3},
+		"PreviewTooltip": ["Kennen1", "Kennen2"]
+	},
+	"Kennen2": {
+		"Name": "Kennen",
+		"Region": ["Bandle City","Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Kennen2.webp",
+		"Level": 2,
+		"Cost": 1,
+		"Power": 2,
+		"Keyword": [],
+		"Skill": "{Play}: Stun an enemy here and grant it -{power_decrease} Power.",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "",
+		"BalanceValues": {"summon_threshold": 3, "power_decrease": 1},
+		"PreviewTooltip": ["Kennen1", "Kennen2"]
 	},
 	
 	# Landmarks
-	"29": {
+	"BuriedSunDisc": {
 		"Name": "Buried Sun Disc",
+		"Region": ["Shurima"],
 		"Type": "Landmark",
 		"SubType": "",
 		"Collectible": false,
@@ -293,13 +386,14 @@ const CARDS = {
 		"Cost": 0,
 		"Keyword": [],
 		"Skill": "Once you have {ascended_threshold}+ level 2 Ascended allies in play, {restore the Sun Disc}.",
-		"LevelUpTo": "30",
+		"LevelUpTo": "RestoredSunDisc",
 		"AbilityType": "transform_landmark",
 		"BalanceValues": {"ascended_threshold": 2},
-		"PreviewTooltip": [29, 30]
+		"PreviewTooltip": ["BuriedSunDisc", "RestoredSunDisc"]
 	},
-	"30": {
+	"RestoredSunDisc": {
 		"Name": "Restored Sun Disc",
+		"Region": ["Shurima"],
 		"Type": "Landmark",
 		"SubType": "",
 		"Collectible": false,
@@ -310,12 +404,13 @@ const CARDS = {
 		"LevelUpTo": null,
 		"AbilityType": "ascend_champions",
 		"BalanceValues": {"draw_count": 1},
-		"PreviewTooltip": [29, 30]
+		"PreviewTooltip": ["BuriedSunDisc", "RestoredSunDisc"]
 	},
 	
 	# Followers
-	"33": {
+	"IcePillar": {
 		"Name": "Ice Pillar",
+		"Region": ["Freljord"],
 		"Type": "Follower",
 		"SubType": "",
 		"Collectible": false,
@@ -326,10 +421,11 @@ const CARDS = {
 		"Skill": "{Play}: Next turn, you get +{mana_bonus} mana.",
 		"AbilityType": "mana_ramp",
 		"BalanceValues": {"mana_bonus": 5},
-		"PreviewTooltip": [31, 32, 33]
+		"PreviewTooltip": ["Trundle1", "Trundle2", "IcePillar"]
 	},
-	"38": {
+	"Chip": {
 		"Name": "Chip",
+		"Region": ["Targon"],
 		"Type": "Follower",
 		"SubType": "",
 		"Collectible": false,
@@ -340,12 +436,12 @@ const CARDS = {
 		"Skill": '"Snow on my feat! Rain on my head!"',
 		"AbilityType": "none",
 		"BalanceValues": {},
-		"PreviewTooltip": [38]
+		"PreviewTooltip": ["Chip"]
 	}
 }
 
 
-static func populate_card_visuals(card: Node, card_data: Dictionary) -> void:
+static func populate_card_visuals(card: Node, card_data: Dictionary, source_card: Node = null) -> void:
 	"""Populate all visual text and sprite nodes on a card from card_data.
 	Single source of truth for card display — replaces duplicated setup blocks
 	that previously appeared in Deck.gd, CardManager.gd, and Card.gd."""
@@ -357,11 +453,14 @@ static func populate_card_visuals(card: Node, card_data: Dictionary) -> void:
 	if cost_label:
 		cost_label.text = str(card_data.get("Cost", 0))
 
-	apply_power_visual(card, card_data)
+	apply_power_visual(card, card_data, source_card)
 
 	var skill_label = card.get_node_or_null("CardFront/TextContainer/Skill")
-	if skill_label:
-		skill_label.text = format_card_text(str(card_data.get("Skill", "")), card_data.get("BalanceValues", {}))
+	var skill_text: String = str(card_data.get("Skill", ""))
+	if skill_label && skill_text != "":
+		skill_label.text = format_card_text(skill_text, card_data.get("BalanceValues", {}))
+	else:
+		skill_label.visible = false
 
 	var level_up_raw = card_data.get("LevelUp", null)
 	var level_up_text: String = str(level_up_raw) if level_up_raw != null else ""
@@ -390,6 +489,30 @@ static func populate_card_visuals(card: Node, card_data: Dictionary) -> void:
 		sub_label.visible = has_sub_type
 	if sub_bg:
 		sub_bg.visible = has_sub_type
+
+	var region: Array = card_data.get("Region", [])
+	var region_sprite_node_1 = card.get_node_or_null("CardFront/TextContainer/RegionContainer/Region1")
+	var region_sprite_node_2 = card.get_node_or_null("CardFront/TextContainer/RegionContainer/Region2")
+	
+	region_sprite_node_1.texture = ResourceLoader.load("res://Assets/RegionSprites/" + (region[0].replace(" ", "")) + ".webp")
+	if region.size() > 1 and region_sprite_node_2:
+		region_sprite_node_2.texture = ResourceLoader.load("res://Assets/RegionSprites/" + (region[1].replace(" ", "")) + ".webp")
+	else:
+		region_sprite_node_2.visible = false
+
+	var keywords: Array = card_data.get("Keyword", [])
+	var keyword_container = card.get_node_or_null("CardFront/TextContainer/KeywordContainer")
+	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
+
+	if keywords.size() > 0:
+		keyword_container.visible = true
+		for keyword in keywords:
+			var item = keyword_item_scene.instantiate()
+			var keyword_sprite_path = "res://Assets/KeywordSprites/" + str(keyword) + ".webp"
+			item.get_node("KeywordSprite").texture = ResourceLoader.load(keyword_sprite_path)
+			keyword_container.add_child(item)
+	else:
+		keyword_container.visible = false
 
 
 static func format_card_text(text: String, balance_values: Dictionary = {}) -> String:
