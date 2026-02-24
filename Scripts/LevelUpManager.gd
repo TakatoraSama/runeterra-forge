@@ -82,6 +82,8 @@ func _is_sun_disc_restored(owner_id: int) -> bool:
 	for card in cm.all_cards_in_play_order:
 		if not is_instance_valid(card) or card.owner_player_id != owner_id:
 			continue
+		if not card.card_slot_is_in:  # card removed from board
+			continue
 		var card_data = CardDatabase.CARDS.get(card.card_id)
 		if card_data and card_data.get("Name", "") == "Restored Sun Disc":
 			return true
@@ -114,14 +116,16 @@ func _check_ascended_sun_disc_upgrade(card: Node) -> void:
 # ─── Individual level-up checks ───────────────────────────────────────────────
 
 func _check_azir_levelup() -> void:
-	"""Azir lv1 → lv2: levels up when ally_threshold+ other resolved allies or
-	landmarks are on the board (landmarks need not be resolved)."""
+	"""Azir lv1 → lv2: levels up when ally_threshold+ summoned allies or
+	landmarks are tracked in cm.summoned_cards (excludes Azir itself)."""
 	var cm := _get_card_manager()
 	if not cm:
 		return
 
 	for azir_card in cm.all_cards_in_play_order:
 		if not is_instance_valid(azir_card) or not azir_card.is_resolved:
+			continue
+		if not azir_card.card_slot_is_in:  # card removed from board
 			continue
 		var azir_data = CardDatabase.CARDS.get(azir_card.card_id)
 		if not azir_data:
@@ -130,21 +134,23 @@ func _check_azir_levelup() -> void:
 			continue
 
 		var owner_id: int     = azir_card.owner_player_id
-		var ally_threshold: int = int(azir_data.get("BalanceValues", {}).get("ally_threshold", 4))
+		var ally_threshold: int = int(azir_data.get("BalanceValues", {}).get("ally_threshold", 6))
 		var count := 0
 
-		for card in cm.all_cards_in_play_order:
-			if not is_instance_valid(card) or card == azir_card:
+		# Count summoned allies and landmarks from summoned_cards tracker
+		for summoned_entry in cm.summoned_cards:
+			if int(summoned_entry.get("owner_player_id", -1)) != owner_id:
 				continue
-			if card.owner_player_id != owner_id:
+			var summoned_card_id: String = summoned_entry.get("card_id", "")
+			# Skip Azir itself (don't count self)
+			if summoned_card_id == azir_card.card_id:
 				continue
-			var c_data = CardDatabase.CARDS.get(card.card_id)
-			if not c_data:
+			var card_data = CardDatabase.CARDS.get(summoned_card_id)
+			if not card_data:
 				continue
-			var c_type: String = c_data.get("Type", "")
-			if c_type == "Landmark":
-				count += 1
-			elif (c_type == "Champion" or c_type == "Follower") and card.is_resolved:
+			var card_type: String = card_data.get("Type", "")
+			# Count Champions, Followers, and Landmarks
+			if card_type == "Landmark" or card_type == "Champion" or card_type == "Follower":
 				count += 1
 
 		if count < ally_threshold:
@@ -154,7 +160,7 @@ func _check_azir_levelup() -> void:
 		if not level_up_to or str(level_up_to) == "":
 			continue
 
-		print("Azir has seen %d other allies/landmarks — leveling up to lv2!" % count)
+		print("Azir has summoned %d allies/landmarks — leveling up to lv2!" % count)
 		azir_card._perform_level_up(str(level_up_to))
 		_notify_zone_power_changed()
 		_check_ascended_sun_disc_upgrade(azir_card)
@@ -174,6 +180,8 @@ func _check_trundle_levelup(resolved_card: Node) -> void:
 
 	for card in cm.all_cards_in_play_order:
 		if not is_instance_valid(card) or card.owner_player_id != owner_id:
+			continue
+		if not card.card_slot_is_in:  # card removed from board
 			continue
 		var card_data = CardDatabase.CARDS.get(card.card_id)
 		if not card_data:
@@ -196,6 +204,8 @@ func _check_xerath_levelup() -> void:
 	for xerath_card in cm.all_cards_in_play_order:
 		if not is_instance_valid(xerath_card) or not xerath_card.is_resolved:
 			continue
+		if not xerath_card.card_slot_is_in:  # card removed from board
+			continue
 		var xerath_data = CardDatabase.CARDS.get(xerath_card.card_id)
 		if not xerath_data:
 			continue
@@ -208,6 +218,8 @@ func _check_xerath_levelup() -> void:
 
 		for card in cm.all_cards_in_play_order:
 			if not is_instance_valid(card) or card.owner_player_id != owner_id or not card.is_resolved:
+				continue
+			if not card.card_slot_is_in:  # card removed from board
 				continue
 			var c_data = CardDatabase.CARDS.get(card.card_id)
 			if not c_data:
@@ -236,6 +248,8 @@ func _check_nasus_levelup() -> void:
 
 	for card in cm.all_cards_in_play_order:
 		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:  # card removed from board
 			continue
 		var card_data = CardDatabase.CARDS.get(card.card_id)
 		if not card_data:
@@ -272,6 +286,8 @@ func _check_sun_disc_transform() -> void:
 	for card in cm.all_cards_in_play_order:
 		if not is_instance_valid(card):
 			continue
+		if not card.card_slot_is_in:  # card removed from board
+			continue
 		var card_data = CardDatabase.CARDS.get(card.card_id)
 		if not card_data:
 			continue
@@ -285,6 +301,8 @@ func _check_sun_disc_transform() -> void:
 
 		for ally in cm.all_cards_in_play_order:
 			if not is_instance_valid(ally) or ally.owner_player_id != owner_id or not ally.is_resolved:
+				continue
+			if not ally.card_slot_is_in:  # card removed from board
 				continue
 			var ally_data = CardDatabase.CARDS.get(ally.card_id)
 			if not ally_data:
@@ -345,6 +363,8 @@ func _on_sun_disc_restored(owner_id: int) -> void:
 	var cards_snapshot: Array = cm.all_cards_in_play_order.duplicate()
 	for ally in cards_snapshot:
 		if not is_instance_valid(ally) or ally.owner_player_id != owner_id:
+			continue
+		if not ally.card_slot_is_in:  # card removed from board
 			continue
 		var ally_data = CardDatabase.CARDS.get(ally.card_id)
 		if not ally_data:

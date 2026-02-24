@@ -19,10 +19,12 @@ var network_manager_reference
 var current_player_id: int = 1  # 0 = top player, 1 = bottom player (default)
 var flip_first_player_id: int = -1  # Synced from GameManager
 var played_cards_order: Array = []  # Cards played this turn only (cleared after resolve)
-var all_cards_in_play_order: Array = []  # Persistent: all cards on board in play order
+var all_cards_in_play_order: Array = []  # Historical: all cards that ever entered the board (append-only, never removed)
 var opponent_played_cards: Array = []  # Cards opponent played (face-down until resolve)
 var _pending_opponent_cards: Array = []  # Deferred opponent card data [{card_id, zone_col, zone_row}]
 var killed_cards: Array = []  # Tracks all cards killed during the game [{card_id, owner_player_id, killer_player_id, killer_card_id}]
+var summoned_cards: Array = []  # Tracks all cards that entered the board [{card_id, owner_player_id, was_played_from_hand}]
+var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
 var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
 
@@ -143,7 +145,9 @@ func finish_drag():
 		played_cards_order.append(card_being_dragged)
 		# Also add to persistent play order
 		all_cards_in_play_order.append(card_being_dragged)
-		
+		# Track as summoned (was_played_from_hand = true)
+		track_summoned_card(card_being_dragged, true)
+
 		# Multiplayer: notify opponent about this card play (face-down)
 		if _is_online() and zone_key != Vector2i(-1, -1):
 			var card_id_str = str(card_being_dragged.card_id)
@@ -273,42 +277,42 @@ func add_card_to_play_order(card) -> void:
 		all_cards_in_play_order.append(card)
 
 
-func create_card_in_hand(card_id_to_create: String) -> void:
+func create_card_in_hand(card_id_to_create: String, creator_card_id: String = "", creator_player_id: int = -1) -> void:
 	"""Create a card by ID and add it to the local player's hand. Reusable for any
-	'create card in hand' ability (Trundle -> Ice Pillar, etc.)."""
+	'create card in hand' ability (Trundle -> Ice Pillar, etc.).
+	creator_card_id: which card created this (empty = unknown/no tracking).
+	creator_player_id: which player created this (-1 = same as owner, -999 = unknown)."""
 	var card_data = CardDatabase.CARDS.get(card_id_to_create)
 	if not card_data:
 		print("create_card_in_hand: unknown card id ", card_id_to_create)
 		return
-	
+
 	var card_scene = load("res://Scenes/Card.tscn")
 	var new_card = card_scene.instantiate()
-	
+
 	new_card.card_id = card_id_to_create
 	new_card.owner_player_id = current_player_id  # belongs to the local player
-	
+
 	# Spawn at screen center so the player sees where it came from
 	var viewport_size = get_viewport_rect().size
 	new_card.position = Vector2(viewport_size.x / 2.0, viewport_size.y / 2.0)
-	
+
 	# Populate card visuals
 	CardDatabase.populate_card_visuals(new_card, card_data)
-	
+
 	add_child(new_card)
 	new_card.name = "Card"
 	new_card.get_node("AnimationPlayer").play("card_flip")
-	
+
 	# Add to hand — this tweens the card from screen center to the hand position
 	player_hand_reference.add_card_to_hand(new_card, 0.3)
-	
+
+	# Track as created card if creator info provided
+	if creator_card_id != "":
+		var creator_player = creator_player_id if creator_player_id != -1 else current_player_id
+		track_created_card(new_card, creator_player, creator_card_id)
+
 	print("Created card in hand: ", card_data.get("Name", ""), " (ID: ", card_id_to_create, ")")
-
-
-func remove_card_from_play_order(card) -> void:
-	"""Remove a card from play order when it's destroyed/removed"""
-	var idx = all_cards_in_play_order.find(card)
-	if idx >= 0:
-		all_cards_in_play_order.remove_at(idx)
 
 
 func track_killed_card(card, killer_player_id: int = -1, killer_card_id: String = "") -> void:
@@ -328,6 +332,43 @@ func track_killed_card(card, killer_player_id: int = -1, killer_card_id: String 
 	# Re-check Nasus level-up immediately when a real kill is recorded.
 	# This prevents delayed level-up until end-of-phase and keeps trigger order intuitive.
 	LevelUpManager._check_nasus_levelup()
+
+
+func track_summoned_card(card, was_played_from_hand: bool = false) -> void:
+	"""Record a summoned card for ability tracking (e.g. Kennen level-up condition).
+	was_played_from_hand: true if the card was dragged from hand to board,
+	false if it was created/summoned directly onto the board."""
+	if not is_instance_valid(card):
+		return
+	summoned_cards.append({
+		"card_id": card.card_id,
+		"owner_player_id": card.owner_player_id,
+		"was_played_from_hand": was_played_from_hand
+	})
+	print("Card summoned tracked: %s (from_hand: %s, total: %d)" % [
+		card.card_id, was_played_from_hand, summoned_cards.size()])
+
+
+func track_created_card(card, creator_player_id: int, creator_card_id: String) -> void:
+	"""Record a card that was created (not from starting deck).
+	creator_player_id: which player created it (-1 = environment/lane effect).
+	creator_card_id: which card created it (or lane ID for lane effects)."""
+	if not is_instance_valid(card):
+		return
+	var game_manager = get_node_or_null("/root/Main/GameManager")
+	var current_turn = 0
+	if game_manager and "turn_number" in game_manager:
+		current_turn = game_manager.turn_number
+
+	created_cards.append({
+		"card_id": card.card_id,
+		"owner_player_id": card.owner_player_id,
+		"creator_player_id": creator_player_id,
+		"creator_card_id": creator_card_id,
+		"created_at_turn": current_turn
+	})
+	print("Card created tracked: %s (created by %s, creator: %s, turn: %d, total: %d)" % [
+		card.card_id, creator_card_id, creator_player_id, current_turn, created_cards.size()])
 
 
 func _sort_cards_by_flip_first(cards: Array) -> Array:
@@ -359,8 +400,8 @@ func trigger_round_start_abilities() -> void:
 	for card in sorted_cards:
 		if not is_instance_valid(card):
 			continue
-		# Re-check: card may have been killed by a prior ability this phase
-		if card not in all_cards_in_play_order:
+		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
+		if not card.card_slot_is_in:
 			continue
 		if card.has_method("on_round_start"):
 			var did_fire = await card.on_round_start()
@@ -380,8 +421,8 @@ func trigger_round_end_abilities() -> void:
 	for card in sorted_cards:
 		if not is_instance_valid(card):
 			continue
-		# Re-check: card may have been killed by a prior ability this phase
-		if card not in all_cards_in_play_order:
+		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
+		if not card.card_slot_is_in:
 			continue
 		if card.has_method("on_round_end"):
 			var did_fire = await card.on_round_end()
@@ -406,7 +447,8 @@ func trigger_game_end_abilities() -> void:
 	for card in sorted_cards:
 		if not is_instance_valid(card):
 			continue
-		if card not in all_cards_in_play_order:
+		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
+		if not card.card_slot_is_in:
 			continue
 		if card.has_method("on_game_end"):
 			var did_fire = await card.on_game_end()
@@ -423,6 +465,8 @@ func trigger_game_end_abilities() -> void:
 	for azir_card in all_cards_in_play_order:
 		if not is_instance_valid(azir_card):
 			continue
+		if not azir_card.card_slot_is_in:  # killed earlier this phase
+			continue
 		if not azir_card.is_resolved:
 			continue
 		var azir_data = CardDatabase.CARDS.get(azir_card.card_id)
@@ -437,7 +481,7 @@ func trigger_game_end_abilities() -> void:
 		for card in sorted_cards:
 			if not is_instance_valid(card) or card == azir_card:
 				continue
-			if card not in all_cards_in_play_order:
+			if not card.card_slot_is_in:  # card was killed earlier this phase
 				continue
 			if card.owner_player_id != owner_id:
 				continue
@@ -482,48 +526,50 @@ func _spawn_pending_opponent_cards() -> void:
 		var card_id_str: String = data["card_id"]
 		var zone_key = Vector2i(data["zone_col"], data["zone_row"])
 		var zone_slots = board_reference.slots_by_zone.get(zone_key, [])
-		
+
 		var available_slot = null
 		for slot in zone_slots:
 			if not slot.card_in_slot:
 				available_slot = slot
 				break
-		
+
 		if not available_slot:
 			print("No available slot for opponent card in zone: ", zone_key)
 			continue
-		
+
 		var card_scene = load("res://Scenes/Card.tscn")
 		var opp_card = card_scene.instantiate()
-		
+
 		opp_card.card_id = card_id_str
 		opp_card.owner_player_id = 0  # Opponent is always player 0 from our view
-		
+
 		var card_data = CardDatabase.CARDS.get(card_id_str)
 		if card_data:
 			CardDatabase.populate_card_visuals(opp_card, card_data)
-		
+
 		opp_card.position = available_slot.position
 		opp_card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
 		opp_card.z_index = 0
 		opp_card.card_slot_is_in = available_slot
 		opp_card.get_node("Area2D/CollisionShape2D").disabled = true
-		
+
 		# Spawn face-down
 		if opp_card.has_method("set_card_back_z_index"):
 			opp_card.set_card_back_z_index(5)
-		
+
 		add_child(opp_card)
 		available_slot.card_in_slot = true
-		
+
 		board_reference.add_card_to_zone(zone_key, opp_card)
-		
+
 		played_cards_order.append(opp_card)
 		all_cards_in_play_order.append(opp_card)
 		opponent_played_cards.append(opp_card)
-		
+		# Track opponent's card as summoned (was_played_from_hand = true — they played it from their hand)
+		track_summoned_card(opp_card, true)
+
 		print("Opponent card spawned face-down: ", card_id_str, " in zone: ", zone_key)
-	
+
 	_pending_opponent_cards.clear()
 
 

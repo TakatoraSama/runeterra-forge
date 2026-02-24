@@ -167,6 +167,9 @@ func _summon_card_in_lane(card_id: String, col: int, player_id: int) -> void:
 	available_slot.card_in_slot = true
 	board.add_card_to_zone(zone_key, new_card)
 	cm.add_card_to_play_order(new_card)
+	# Track as created by lane (creator_player_id = -1 for environment/lane)
+	var lane_id = _lane_ids[col] if col < _lane_ids.size() else "UnknownLane"
+	cm.track_created_card(new_card, -1, lane_id)
 
 	print("LaneManager: summoned %s for player %d in lane %d" % [card_data.get("Name", card_id), player_id, col])
 

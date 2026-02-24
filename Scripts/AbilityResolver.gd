@@ -164,6 +164,7 @@ func _ability_summon_copy(card: Node) -> void:
 	var new_card   = card_scene.instantiate()
 
 	new_card.card_id = card.card_id
+	new_card.owner_player_id = card.owner_player_id  # copy belongs to same player as original
 	var card_data    = CardDatabase.CARDS[card.card_id]
 	CardDatabase.populate_card_visuals(new_card, card_data)
 
@@ -181,6 +182,8 @@ func _ability_summon_copy(card: Node) -> void:
 		board.add_card_to_zone(zone_key, new_card)
 
 	cm.add_card_to_play_order(new_card)
+	cm.track_summoned_card(new_card, false)  # summoned directly (not from hand)
+	cm.track_created_card(new_card, card.owner_player_id, card.card_id)  # created by the card ability
 	new_card.is_resolved = true
 	if new_card.has_method("hide_card_back"):
 		new_card.hide_card_back()
@@ -405,7 +408,7 @@ func _ability_kill_ally_buff(card: Node) -> void:
 			weakest_card.card_slot_is_in.card_in_slot = false
 		board.remove_card_from_zone(zone_key, weakest_card)
 		board.reposition_cards_in_zone(zone_key)
-		cm.remove_card_from_play_order(weakest_card)
+		weakest_card.card_slot_is_in = null  # Mark as removed from board (historical tracker guard)
 		weakest_card.queue_free()
 
 	# 'and' — buff ALWAYS applies regardless of whether the kill succeeded
@@ -645,7 +648,7 @@ func _ability_nasus_game_end_kill(card: Node) -> void:
 		target.card_slot_is_in.card_in_slot = false
 	board.remove_card_from_zone(enemy_zone, target)
 	board.reposition_cards_in_zone(enemy_zone)
-	cm.remove_card_from_play_order(target)
+	target.card_slot_is_in = null  # Mark as removed from board (historical tracker guard)
 	target.queue_free()
 
 	print("%s Game End: killed %s (Power %d)" % [my_name, target_name, target_power])
@@ -698,6 +701,8 @@ func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 	available_slot.card_in_slot = true
 	board.add_card_to_zone(mid_zone, sun_disc)
 	cm.add_card_to_play_order(sun_disc)
+	cm.track_summoned_card(sun_disc, false)  # summoned directly (not from hand)
+	cm.track_created_card(sun_disc, owner_player_id, "Azir1")  # created by Azir
 
 	print("Buried Sun Disc summoned at mid lane!")
 
@@ -750,6 +755,8 @@ func _receive_opponent_game_start_summon(card_id_str: String, zone_col: int, zon
 	available_slot.card_in_slot = true
 	board.add_card_to_zone(zone_key, opp_card)
 	cm.add_card_to_play_order(opp_card)
+	cm.track_summoned_card(opp_card, false)  # summoned directly (not from hand)
+	cm.track_created_card(opp_card, opp_card.owner_player_id, "Azir1")  # created by opponent's Azir
 
 	print("Opponent game-start summon received: %s in zone %s" % [card_id_str, str(zone_key)])
 

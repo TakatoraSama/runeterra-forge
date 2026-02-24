@@ -28,10 +28,11 @@ func recalculate_auras() -> void:
 	if not cm or not board:
 		return
 
-	# Step 1 – reset aura modifier on every card in play
-	for card in cm.all_cards_in_play_order:
-		if is_instance_valid(card):
-			card.aura_power_modifier = 0
+	# Step 1 – reset aura modifier on every card currently on the board
+	for zone_key in board.cards_by_zone:
+		for card in board.get_cards_in_zone(zone_key):
+			if is_instance_valid(card):
+				card.aura_power_modifier = 0
 
 	# Step 2 – reapply auras from each active aura source
 	for card in cm.all_cards_in_play_order:
@@ -59,12 +60,13 @@ func recalculate_auras() -> void:
 			# Fallback for any future non-Azir ascended-aura card
 			_apply_aura_azir(card, zone_key)
 
-	# Step 3 – refresh the power label on every card on the board
-	for card in cm.all_cards_in_play_order:
-		if is_instance_valid(card):
-			var power_label = card.get_node_or_null("CardFront/Power")
-			if power_label:
-				power_label.text = card.get_power_display_text()
+	# Step 3 – refresh the power label on every card currently on the board
+	for zone_key in board.cards_by_zone:
+		for card in board.get_cards_in_zone(zone_key):
+			if is_instance_valid(card):
+				var power_label = card.get_node_or_null("CardFront/Power")
+				if power_label:
+					power_label.text = card.get_power_display_text()
 
 
 # ─── Individual aura implementations ─────────────────────────────────────────
