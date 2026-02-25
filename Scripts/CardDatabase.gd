@@ -291,7 +291,7 @@ const CARDS = {
 		"Cost": 3,
 		"Power": 4,
 		"Keyword": ["Regeneration"],
-		"Skill": "{Game End}: Grant me +{behold_power} Power for each {mana_threshold}+ mana unit you behold.",
+		"Skill": "{Game End}: Grant me +{behold_power} Power for each {mana_threshold}+ cost unit you behold.",
 		"LevelUp": "",
 		"LevelUpTo": null,
 		"AbilityType": "conditional_buff",
@@ -374,6 +374,82 @@ const CARDS = {
 		"BalanceValues": {"power_decrease": 1},
 		"PreviewTooltip": ["Kennen1", "Kennen2"]
 	},
+
+	# Champions - Irelia line
+	"Irelia1": {
+		"Name": "Irelia",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Irelia1.webp",
+		"Level": 1,
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": [],
+		"Skill": "When I {swap lane}, summon a [Blade] at the original lane.",
+		"LevelUp": "You've summoned {ally_threshold}+ allies.",
+		"LevelUpTo": "Irelia2",
+		"AbilityType": "",
+		"BalanceValues": {"ally_threshold": 6},
+		"PreviewTooltip": ["Irelia1", "Irelia2", "Blade"]
+	},
+	"Irelia2": {
+		"Name": "Irelia",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Irelia2.webp",
+		"Level": 2,
+		"Cost": 2,
+		"Power": 3,
+		"Keyword": [],
+		"Skill": "When I {swap lane}, summon a [Blade] at the original lane. [br] Aura: 1 cost allies have +1 Power.",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "",
+		"BalanceValues": {"ally_threshold": 6},
+		"PreviewTooltip": ["Irelia1", "Irelia2", "Blade"]
+	},
+
+	# Champions - Sion line
+	"Sion1": {
+		"Name": "Sion",
+		"Region": ["Noxus"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Sion1.webp",
+		"Level": 1,
+		"Cost": 6,
+		"Power": 8,
+		"Keyword": [],
+		"Skill": "When I'm discarded, grant another ally in hand +2 Power.",
+		"LevelUp": "You've discarded or summoned {power_threshold}+ Power.",
+		"LevelUpTo": "Sion2",
+		"AbilityType": "",
+		"BalanceValues": {"power_threshold": 32},
+		"PreviewTooltip": ["Sion1", "Sion2"]
+	},
+	"Sion2": {
+		"Name": "Sion",
+		"Region": ["Noxus"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Sion2.webp",
+		"Level": 2,
+		"Cost": 6,
+		"Power": 9,
+		"Keyword": [],
+		"Skill": "I have +{power_increase} Power for each card you've discarded this game. [br]",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "",
+		"BalanceValues": {"power_increase": 1},
+		"PreviewTooltip": ["Sion1", "Sion2"]
+	},
 	
 	# Landmarks
 	"BuriedSunDisc": {
@@ -437,7 +513,22 @@ const CARDS = {
 		"AbilityType": "none",
 		"BalanceValues": {},
 		"PreviewTooltip": ["Chip"]
-	}
+	},
+	"Blade": {
+		"Name": "Blade",
+		"Region": ["Ionia"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Blade.webp",
+		"Cost": 1,
+		"Power": 1,
+		"Keyword": [],
+		"Skill": "{Aura}: Other allied [Blades] have +{aura_power} Power.",
+		"AbilityType": "none",
+		"BalanceValues": {"aura_power": 1},
+		"PreviewTooltip": ["Irelia1", "Irelia2", "Blade"]
+	},
 }
 
 
