@@ -1,5 +1,12 @@
 extends Node
 
+# ── Constants ───────────────────────────────────────────────────────────────────
+
+var SWAP_DURATION = 1  # seconds for the tween animation of each swap
+
+
+# ── Overview ───────────────────────────────────────────────────────────────────
+
 ## SwapLaneManager – owns all Elusive swap-lane logic.
 ## AutoLoad singleton: accessible from any script via SwapLaneManager.<method>.
 ##
@@ -93,26 +100,34 @@ func execute_swaps() -> void:
 
 	var sorted_swaps := _sort_swaps_by_flip_first(pending_swaps, card_manager.flip_first_player_id)
 
-	# ── Step 1: snap all cards instantly back to their origin slots ────────
+	# ── Step 1: snap all cards instantly back to their origin zones ────────
 	for entry in sorted_swaps:
 		var card = entry["card"]
 		if not is_instance_valid(card):
 			continue
 
 		var from_zone: Vector2i = entry["from_zone"]
-		var from_slot = entry["from_slot"]
 		var to_zone: Vector2i = entry["to_zone"]
-		var to_slot = entry["to_slot"]
 
-		# Undo the temporary destination placement
+		# Undo the temporary destination placement — clear whichever slot the card
+		# currently occupies (may differ from stored to_slot after reposition).
 		board.remove_card_from_zone(to_zone, card)
-		to_slot.card_in_slot = false
+		var current_dest_slot = card.card_slot_is_in
+		if current_dest_slot:
+			current_dest_slot.card_in_slot = false
 
-		# Re-anchor at origin (instant — no tween)
+		# Re-anchor at origin — find first free slot (origin zone may have been
+		# repositioned since the drag, so stored from_slot could be occupied).
 		board.add_card_to_zone(from_zone, card)
-		from_slot.card_in_slot = true
-		card.card_slot_is_in = from_slot
-		card.position = from_slot.position
+		var snap_slot = null
+		for s in board.slots_by_zone.get(from_zone, []):
+			if not s.card_in_slot:
+				snap_slot = s
+				break
+		if snap_slot:
+			snap_slot.card_in_slot = true
+			card.card_slot_is_in = snap_slot
+			card.position = snap_slot.position
 
 	# ── Step 2: animate each card to its destination, one at a time ───────
 	for entry in sorted_swaps:
@@ -121,7 +136,6 @@ func execute_swaps() -> void:
 			continue
 
 		var from_zone: Vector2i = entry["from_zone"]
-		var from_slot = entry["from_slot"]
 		var to_zone: Vector2i = entry["to_zone"]
 		var to_slot = entry["to_slot"]
 
@@ -131,18 +145,28 @@ func execute_swaps() -> void:
 				card.card_id, str(from_zone)])
 			continue
 
-		# Move tracking: origin → destination
+		# Move tracking: origin → destination (use card's actual current slot from step 1)
+		var actual_from_slot = card.card_slot_is_in
 		board.remove_card_from_zone(from_zone, card)
-		from_slot.card_in_slot = false
+		if actual_from_slot:
+			actual_from_slot.card_in_slot = false
 
 		board.add_card_to_zone(to_zone, card)
 		to_slot.card_in_slot = true
 		card.card_slot_is_in = to_slot
 
-		# Animate to destination
+		# Animate to destination — elevate z_index so card renders above others
+		card.z_index = 10
 		var tween = card.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		tween.tween_property(card, "position", to_slot.position, 0.4)
+		tween.tween_property(card, "position", to_slot.position, SWAP_DURATION)
 		await tween.finished
+		card.z_index = 0  # Restore to CARD_BOARD_Z_INDEX
+
+		# Fire swap-arrive ability only for locally-owned cards.
+		# Both clients run execute_swaps(), but abilities must only resolve
+		# on the owning player's client to avoid double-recall RPCs.
+		if card.owner_player_id == card_manager.current_player_id:
+			await AbilityResolver.execute_swap_arrive_ability(card, to_zone)
 
 		# Record in permanent history
 		swap_history.append({

@@ -40,16 +40,20 @@ func raycast_at_cursor():
 	parameters.position = get_global_mouse_position()
 	parameters.collide_with_areas = true
 	var result = space_state.intersect_point(parameters)
-	if result.size() > 0:
-		var result_collision_mask = result[0].collider.collision_mask
-		if result_collision_mask == COLLISION_MASK_CARD:
-			var card_found = result[0].collider.get_parent()
+	# Scan all results: an Elusive card and its slot overlap exactly, so result[0]
+	# may be the slot (mask=2) instead of the card (mask=1). Check every hit.
+	for r in result:
+		var mask = r.collider.collision_mask
+		if mask == COLLISION_MASK_CARD:
+			var card_found = r.collider.get_parent()
 			if card_found:
 				card_manager_reference.start_drag(card_found)
-		elif result_collision_mask == COLLISION_MASK_DECK:
+			return
+		elif mask == COLLISION_MASK_DECK:
 			# Click-to-draw disabled — auto-draw is handled by GameManager now.
 			# deck_reference.draw_card()
 			print("Deck clicked. Cards left: ", deck_reference.player_deck.size())
+			return
 
 func _handle_right_click() -> void:
 	var space_state = get_world_2d().direct_space_state

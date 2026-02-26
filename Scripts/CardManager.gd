@@ -152,6 +152,8 @@ func _finish_swap_drag() -> void:
 				dest_zone, dest_slot,
 				current_player_id
 			)
+			board_reference.reposition_cards_in_zone(_swap_drag_origin_zone)
+			board_reference.reposition_cards_in_zone(dest_zone)
 			if _is_online():
 				rpc("_receive_opponent_swap", card_id_str, from_col, to_col)
 			card_being_dragged = null
@@ -367,6 +369,58 @@ func add_card_to_play_order(card) -> void:
 	"""Add a card to the persistent play order (for summoned cards, etc.)"""
 	if card and not all_cards_in_play_order.has(card):
 		all_cards_in_play_order.append(card)
+
+
+func recall_card(card) -> void:
+	"""Return a board card to its owner's hand (Recall mechanic).
+	Removes the card from its slot and zone, then animates it flying back to
+	the local player's hand. Only adds to hand when the card belongs to the
+	local player — opponent cards are simply removed from the board (the
+	opponent's client manages their own hand).
+	Reusable for any card ability that recalls an ally (Ahri, future cards…)."""
+	if not is_instance_valid(card):
+		return
+
+	# Release slot and remove from zone tracking
+	var zone_key := Vector2i(-1, -1)
+	if card.card_slot_is_in:
+		zone_key = board_reference.get_zone_for_slot(card.card_slot_is_in)
+		card.card_slot_is_in.card_in_slot = false
+	card.card_slot_is_in = null
+
+	if zone_key != Vector2i(-1, -1):
+		board_reference.remove_card_from_zone(zone_key, card)
+		board_reference.reposition_cards_in_zone(zone_key)
+		# Notify the opponent so their client removes the card from the same zone
+		if _is_online():
+			var mirrored_zone := Vector2i(zone_key.x, 1 - zone_key.y)
+			rpc("_receive_opponent_recall", card.card_id, mirrored_zone.x, mirrored_zone.y)
+
+	# Opponent cards are only removed from the board — do not add to local hand
+	if card.owner_player_id != current_player_id:
+		print("Recalled opponent card %s — removed from board" % card.card_id)
+		return
+
+	# Reset board state before the flight animation
+	card.is_resolved = false
+	card.z_index = 10  # elevated so it renders above other cards during flight
+
+	# Re-enable collision so the card can be dragged from hand
+	var col_shape = card.get_node_or_null("Area2D/CollisionShape2D")
+	if col_shape:
+		col_shape.disabled = false
+
+	# Scale tween: board size (0.15) → hand size (0.2) over the flight duration
+	var scale_tween = card.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	scale_tween.tween_property(card, "scale", Vector2(DEFAULT_CARD_SCALE, DEFAULT_CARD_SCALE), 0.8)
+
+	# Position tween: fly from board position directly to the correct hand slot
+	# (same mechanic as create_card_in_hand / Trundle Ice Pillar)
+	player_hand_reference.add_card_to_hand(card, 0.8)
+
+	await scale_tween.finished
+	card.z_index = 2
+	print("Recalled: %s to player %d's hand" % [card.card_id, card.owner_player_id])
 
 
 func create_card_in_hand(card_id_to_create: String, creator_card_id: String = "", creator_player_id: int = -1) -> void:
@@ -619,6 +673,30 @@ func _receive_opponent_swap(card_id: String, from_col: int, to_col: int) -> void
 	opponent's card jump to a new lane before the swap animation plays."""
 	_pending_opponent_swaps.append({"card_id": card_id, "from_col": from_col, "to_col": to_col})
 	print("Opponent swap queued: '%s' col %d → col %d (applied at SWAP_LANE phase)" % [card_id, from_col, to_col])
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_recall(card_id: String, zone_col: int, zone_row: int) -> void:
+	"""Opponent recalled a card — remove it from our board view and reposition the zone.
+	The card is freed entirely; the opponent's client handles adding it to their own hand."""
+	var zone_key := Vector2i(zone_col, zone_row)
+	var target_card = null
+	for c in board_reference.get_cards_in_zone(zone_key):
+		if is_instance_valid(c) and c.card_id == card_id:
+			target_card = c
+			break
+
+	if not target_card:
+		print("_receive_opponent_recall: '%s' not found in zone %s" % [card_id, str(zone_key)])
+		return
+
+	if target_card.card_slot_is_in:
+		target_card.card_slot_is_in.card_in_slot = false
+	target_card.card_slot_is_in = null
+	board_reference.remove_card_from_zone(zone_key, target_card)
+	board_reference.reposition_cards_in_zone(zone_key)
+	target_card.queue_free()
+	print("_receive_opponent_recall: removed '%s' from zone %s" % [card_id, str(zone_key)])
 
 
 func apply_pending_opponent_swaps() -> void:

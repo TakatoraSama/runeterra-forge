@@ -761,6 +761,60 @@ func _receive_opponent_game_start_summon(card_id_str: String, zone_col: int, zon
 	print("Opponent game-start summon received: %s in zone %s" % [card_id_str, str(zone_key)])
 
 
+# ─── Swap-arrive abilities ─────────────────────────────────────────────────────
+
+func execute_swap_arrive_ability(card: Node, to_zone: Vector2i) -> void:
+	"""Called by SwapLaneManager after an Elusive card completes its swap tween.
+	Dispatches the card's swap-arrive ability, if any."""
+	if not is_instance_valid(card) or card.card_id == "":
+		return
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+	var ability_type: String = card_data.get("AbilityType", "none")
+	match ability_type:
+		"swap_arrive_recall":
+			await _ability_swap_arrive_recall(card, to_zone)
+		_:
+			pass
+
+
+func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
+	"""Ahri {Swap Lane}: recall the weakest resolved ally at the destination zone.
+	The recalled ally is returned to its owner's hand. Landmarks are excluded."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm:
+		return
+
+	# Find the weakest resolved ally at the destination (exclude Ahri herself and Landmarks)
+	var weakest_card = null
+	var weakest_power: float = INF
+
+	for c in board.get_cards_in_zone(to_zone):
+		if not is_instance_valid(c) or c == card:
+			continue
+		if c.owner_player_id != card.owner_player_id:
+			continue
+		if not c.is_resolved:
+			continue
+		var card_type: String = CardDatabase.CARDS.get(c.card_id, {}).get("Type", "")
+		if card_type != "Champion" and card_type != "Follower":
+			continue
+		var power: float = c.get_current_power() if c.has_method("get_current_power") else 0.0
+		if power < weakest_power:
+			weakest_power = power
+			weakest_card  = c
+
+	if not weakest_card:
+		print("Ahri swap-arrive: no valid ally to recall in zone %s" % str(to_zone))
+		return
+
+	print("Ahri swap-arrive recall: %s (power %d) from zone %s" % [
+		weakest_card.card_id, int(weakest_power), str(to_zone)])
+	await cm.recall_card(weakest_card)
+
+
 # ─── Shared helpers ────────────────────────────────────────────────────────────
 
 func _calc_zone_power(board: Node, zone_key: Vector2i) -> int:

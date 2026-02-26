@@ -314,7 +314,7 @@ const CARDS = {
 		"Skill": "Each round, when I {swap lane}, {recall} the weakest ally here.",
 		"LevelUp": "I've recalled {recall_threshold}+ allies.",
 		"LevelUpTo": "Ahri2",
-		"AbilityType": "",
+		"AbilityType": "swap_arrive_recall",
 		"BalanceValues": {"recall_threshold": 3},
 		"PreviewTooltip": ["Ahri1", "Ahri2"]
 	},
