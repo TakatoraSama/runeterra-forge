@@ -287,6 +287,21 @@ func add_card_to_zone(zone_key: Vector2i, card: Node2D) -> void:
 		cards_by_zone[zone_key].append(card)
 
 
+func insert_card_to_zone_at_slot(zone_key: Vector2i, card: Node2D, target_slot) -> void:
+	"""Insert card into zone's card list at the index matching target_slot's position
+	in slots_by_zone. This ensures reposition_cards_in_zone() places the card at the
+	intended visual slot. Falls back to appending if slot is not found."""
+	if not cards_by_zone.has(zone_key):
+		cards_by_zone[zone_key] = []
+	if card in cards_by_zone[zone_key]:
+		return
+	var zone_slots = slots_by_zone.get(zone_key, [])
+	var slot_idx = zone_slots.find(target_slot)
+	var insert_pos = min(slot_idx if slot_idx >= 0 else cards_by_zone[zone_key].size(),
+						cards_by_zone[zone_key].size())
+	cards_by_zone[zone_key].insert(insert_pos, card)
+
+
 func remove_card_from_zone(zone_key: Vector2i, card: Node2D) -> void:
 	if cards_by_zone.has(zone_key) and card in cards_by_zone[zone_key]:
 		cards_by_zone[zone_key].erase(card)

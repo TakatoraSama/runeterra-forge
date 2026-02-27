@@ -812,7 +812,9 @@ func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
 
 	print("Ahri swap-arrive recall: %s (power %d) from zone %s" % [
 		weakest_card.card_id, int(weakest_power), str(to_zone)])
-	await cm.recall_card(weakest_card)
+	await cm.recall_card(weakest_card, card.owner_player_id, card.card_id)
+	LevelUpManager._check_ahri_levelup()
+	await cm._wait_for_level_up()
 
 
 # ─── Shared helpers ────────────────────────────────────────────────────────────

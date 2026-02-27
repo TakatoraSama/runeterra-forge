@@ -40,6 +40,7 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_azir_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
+	_check_ahri_levelup()
 	_check_sun_disc_transform()
 
 
@@ -49,6 +50,7 @@ func check_level_ups_after_abilities() -> void:
 	_check_azir_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
+	_check_ahri_levelup()
 	_check_sun_disc_transform()
 
 
@@ -273,6 +275,42 @@ func _check_nasus_levelup() -> void:
 			print("Nasus lv1 met level-up condition! (player %d has %d kills)" % [owner_id, owner_kill_count])
 			card._perform_level_up(str(level_up_to))
 			_check_ascended_sun_disc_upgrade(card)
+			_notify_zone_power_changed()
+
+
+func _check_ahri_levelup() -> void:
+	"""Ahri lv1 → lv2: levels up when Ahri has recalled recall_threshold+ allies."""
+	var cm := _get_card_manager()
+	if not cm or cm.recalled_cards.is_empty():
+		return
+
+	for ahri_card in cm.all_cards_in_play_order:
+		if not is_instance_valid(ahri_card) or not ahri_card.is_resolved:
+			continue
+		if not ahri_card.card_slot_is_in:  # card removed from board
+			continue
+		var ahri_data = CardDatabase.CARDS.get(ahri_card.card_id)
+		if not ahri_data:
+			continue
+		if ahri_data.get("Name", "") != "Ahri" or ahri_data.get("Level", 1) != 1:
+			continue
+
+		var recall_threshold: int = int(ahri_data.get("BalanceValues", {}).get("recall_threshold", 3))
+		var owner_id: int = ahri_card.owner_player_id
+		var recall_count := 0
+
+		for recall_entry in cm.recalled_cards:
+			if int(recall_entry.get("recaller_player_id", -1)) == owner_id \
+					and recall_entry.get("recaller_card_id", "") == ahri_card.card_id:
+				recall_count += 1
+
+		if recall_count < recall_threshold:
+			continue
+
+		var level_up_to = ahri_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Ahri lv1 has recalled %d allies — leveling up to lv2!" % recall_count)
+			ahri_card._perform_level_up(str(level_up_to))
 			_notify_zone_power_changed()
 
 

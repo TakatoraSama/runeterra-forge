@@ -180,6 +180,11 @@ func _perform_level_up(new_card_id: String) -> void:
 	# Update identity immediately so callers reading card_id see the new value
 	card_id = new_card_id
 
+	# Notify opponent: only broadcast for locally-owned cards to prevent echo
+	if _card_manager and _card_manager._is_online() \
+			and owner_player_id == _card_manager.current_player_id:
+		_card_manager.rpc("_receive_opponent_level_up", old_id, new_card_id)
+
 	# ── 0. Acquire global level-up lock ──────────────────────────────────
 	if _card_manager:
 		while _card_manager._level_up_in_progress:

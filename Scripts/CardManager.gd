@@ -25,6 +25,7 @@ var _pending_opponent_cards: Array = []  # Deferred opponent card data [{card_id
 var killed_cards: Array = []  # Tracks all cards killed during the game [{card_id, owner_player_id, killer_player_id, killer_card_id}]
 var summoned_cards: Array = []  # Tracks all cards that entered the board [{card_id, owner_player_id, was_played_from_hand}]
 var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
+var recalled_cards: Array = []  # Tracks all recalls triggered by cards [{card_id, owner_player_id, recaller_player_id, recaller_card_id}]
 var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
 var _is_swap_drag: bool = false           # True when dragging an Elusive board card for a lane swap
@@ -371,7 +372,7 @@ func add_card_to_play_order(card) -> void:
 		all_cards_in_play_order.append(card)
 
 
-func recall_card(card) -> void:
+func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = "") -> void:
 	"""Return a board card to its owner's hand (Recall mechanic).
 	Removes the card from its slot and zone, then animates it flying back to
 	the local player's hand. Only adds to hand when the card belongs to the
@@ -421,6 +422,8 @@ func recall_card(card) -> void:
 	await scale_tween.finished
 	card.z_index = 2
 	print("Recalled: %s to player %d's hand" % [card.card_id, card.owner_player_id])
+	if recaller_card_id != "":
+		track_recalled_card(card, recaller_player_id, recaller_card_id)
 
 
 func create_card_in_hand(card_id_to_create: String, creator_card_id: String = "", creator_player_id: int = -1) -> void:
@@ -515,6 +518,22 @@ func track_created_card(card, creator_player_id: int, creator_card_id: String) -
 	})
 	print("Card created tracked: %s (created by %s, creator: %s, turn: %d, total: %d)" % [
 		card.card_id, creator_card_id, creator_player_id, current_turn, created_cards.size()])
+
+
+func track_recalled_card(card: Node, recaller_player_id: int, recaller_card_id: String) -> void:
+	"""Record a recall triggered by a card ability.
+	recaller_player_id: which player's card triggered the recall.
+	recaller_card_id: which card triggered the recall (e.g. 'Ahri1')."""
+	if not is_instance_valid(card):
+		return
+	recalled_cards.append({
+		"card_id": card.card_id,
+		"owner_player_id": card.owner_player_id,
+		"recaller_player_id": recaller_player_id,
+		"recaller_card_id": recaller_card_id
+	})
+	print("Recall tracked: %s recalled by %s (player %d, total: %d)" % [
+		card.card_id, recaller_card_id, recaller_player_id, recalled_cards.size()])
 
 
 func _sort_cards_by_flip_first(cards: Array) -> Array:
@@ -673,6 +692,26 @@ func _receive_opponent_swap(card_id: String, from_col: int, to_col: int) -> void
 	opponent's card jump to a new lane before the swap animation plays."""
 	_pending_opponent_swaps.append({"card_id": card_id, "from_col": from_col, "to_col": to_col})
 	print("Opponent swap queued: '%s' col %d → col %d (applied at SWAP_LANE phase)" % [card_id, from_col, to_col])
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_level_up(old_card_id: String, new_card_id: String) -> void:
+	"""Opponent's card leveled up — play the level-up animation on our board."""
+	for card in all_cards_in_play_order:
+		if not is_instance_valid(card):
+			continue
+		if card.card_id == old_card_id and card.card_slot_is_in \
+				and card.owner_player_id != current_player_id:
+			card._perform_level_up(new_card_id)
+			return
+	print("_receive_opponent_level_up: '%s' not found on board" % old_card_id)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_notify_swap_step_done() -> void:
+	"""Opponent finished their swap-arrive ability (including any level-up). Unblock SwapLaneManager."""
+	SwapLaneManager._swap_steps_received += 1
+	SwapLaneManager._swap_step_done.emit()
 
 
 @rpc("any_peer", "reliable")

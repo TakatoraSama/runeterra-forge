@@ -26,6 +26,13 @@ var pending_swaps: Array = []
 ##                cause_card_id, from_zone, to_zone, turn_number}
 var swap_history: Array = []
 
+## Multiplayer sync: emitted when the opponent's swap-arrive ability (incl. level-up) finishes.
+signal _swap_step_done
+## Semaphore: counts "step done" notifications received from the opponent.
+## Using a counter (not a bool) handles the case where multiple notifications
+## arrive before the awaiting coroutine has a chance to consume them.
+var _swap_steps_received: int = 0
+
 
 # ── Scene-tree helpers ────────────────────────────────────────────────────────
 
@@ -99,6 +106,7 @@ func execute_swaps() -> void:
 		return
 
 	var sorted_swaps := _sort_swaps_by_flip_first(pending_swaps, card_manager.flip_first_player_id)
+	_swap_steps_received = 0  # reset semaphore for this phase
 
 	# ── Step 1: snap all cards instantly back to their origin zones ────────
 	for entry in sorted_swaps:
@@ -116,18 +124,12 @@ func execute_swaps() -> void:
 		if current_dest_slot:
 			current_dest_slot.card_in_slot = false
 
-		# Re-anchor at origin — find first free slot (origin zone may have been
-		# repositioned since the drag, so stored from_slot could be occupied).
-		board.add_card_to_zone(from_zone, card)
-		var snap_slot = null
-		for s in board.slots_by_zone.get(from_zone, []):
-			if not s.card_in_slot:
-				snap_slot = s
-				break
-		if snap_slot:
-			snap_slot.card_in_slot = true
-			card.card_slot_is_in = snap_slot
-			card.position = snap_slot.position
+		# Re-anchor at origin — insert at the original slot's index so reposition
+		# places the swap card back at its original visual slot. Hidden new cards
+		# that may have filled the spot are pushed to later slots by reposition.
+		board.insert_card_to_zone_at_slot(from_zone, card, entry["from_slot"])
+		board.reposition_cards_in_zone(from_zone)
+		# card.card_slot_is_in and card.position are set by reposition_cards_in_zone
 
 	# ── Step 2: animate each card to its destination, one at a time ───────
 	for entry in sorted_swaps:
@@ -150,8 +152,12 @@ func execute_swaps() -> void:
 		board.remove_card_from_zone(from_zone, card)
 		if actual_from_slot:
 			actual_from_slot.card_in_slot = false
+		# Reposition origin zone: Step 1 displaced hidden new cards when it inserted
+		# the swap card. Now that the swap card has left, compact the remaining cards
+		# back into the correct slots. New cards are still hidden so this is invisible.
+		board.reposition_cards_in_zone(from_zone)
 
-		board.add_card_to_zone(to_zone, card)
+		board.insert_card_to_zone_at_slot(to_zone, card, to_slot)
 		to_slot.card_in_slot = true
 		card.card_slot_is_in = to_slot
 
@@ -162,11 +168,30 @@ func execute_swaps() -> void:
 		await tween.finished
 		card.z_index = 0  # Restore to CARD_BOARD_Z_INDEX
 
+		# Does this card have a swap-arrive ability that takes meaningful time?
+		var _cd: Dictionary = CardDatabase.CARDS.get(card.card_id, {})
+		var _has_ability: bool = _cd.get("AbilityType", "").begins_with("swap_arrive_")
+
 		# Fire swap-arrive ability only for locally-owned cards.
 		# Both clients run execute_swaps(), but abilities must only resolve
 		# on the owning player's client to avoid double-recall RPCs.
 		if card.owner_player_id == card_manager.current_player_id:
 			await AbilityResolver.execute_swap_arrive_ability(card, to_zone)
+			# In multiplayer: notify opponent that our ability (incl. level-up) is fully done.
+			if card_manager._is_online() and _has_ability:
+				card_manager.rpc("_rpc_notify_swap_step_done")
+		elif card_manager._is_online() and _has_ability:
+			# Opponent owns this card — wait for their "ability done" notification so both
+			# clients stay in sync (e.g. both see the full level-up before the next swap).
+			if _swap_steps_received <= 0:
+				await _swap_step_done
+			_swap_steps_received -= 1
+
+		# Reposition to_zone after ability to fix slot assignments on opponent's client.
+		# If a recall RPC arrived early (before Ahri was inserted into the zone),
+		# cards_by_zone may be out of sync. This compacts the zone correctly on both clients.
+		# On the local client, recall_card already repositioned — this is a no-op.
+		board.reposition_cards_in_zone(to_zone)
 
 		# Record in permanent history
 		swap_history.append({
