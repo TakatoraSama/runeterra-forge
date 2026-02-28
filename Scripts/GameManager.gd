@@ -244,10 +244,15 @@ func _proceed_to_resolve() -> void:
 
 	_set_round_phase(RoundPhase.RESOLVE)
 	await _resolve_phase()
-	
+
+	# Re-sync hand state after resolve so resolve-created cards (e.g. Trundle's Ice Pillar)
+	# are included in opponent_hand_card_ids for behold calculations at game end.
+	if _is_online() and card_manager and card_manager.has_method("sync_hand_data"):
+		card_manager.sync_hand_data()
+
 	# Update zone power texts after cards are revealed
 	_update_zone_power_display()
-	
+
 	_set_round_phase(RoundPhase.ROUND_END)
 	
 	# Trigger Round End abilities in play order (respects flip first)
@@ -305,7 +310,12 @@ func end_game() -> void:
 	game_phase = GamePhase.GAME_END
 	round_phase = RoundPhase.NONE
 	_emit_phase()
-	
+
+	# Sync RNG for game-end abilities: both clients share turn_number and
+	# flip_first_player_id (synced via RPC), so this seed is identical on host
+	# and client with no extra network call needed.
+	seed(turn_number * 7919 + flip_first_player_id * 1337)
+
 	# Trigger Game End abilities in play order
 	if card_manager and card_manager.has_method("trigger_game_end_abilities"):
 		await card_manager.trigger_game_end_abilities()

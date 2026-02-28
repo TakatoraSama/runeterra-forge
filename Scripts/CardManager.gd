@@ -45,6 +45,7 @@ class BeheldCardProxy extends RefCounted:
 func _notify_zone_power_changed() -> void:
 	"""Recalculate auras via AuraSystem, then ask GameManager to refresh zone power labels."""
 	AuraSystem.recalculate_auras()
+	LevelUpManager.check_conditional_buff_level_ups()
 	if game_manager_reference and game_manager_reference.has_method("_update_zone_power_display"):
 		game_manager_reference._update_zone_power_display()
 
@@ -209,10 +210,8 @@ func finish_drag():
 
 		# Mana check + spend
 		var card_cost := 0
-		if card_being_dragged and ("card_id" in card_being_dragged):
-			var card_data = CardDatabase.CARDS.get(str(card_being_dragged.card_id), null)
-			if card_data:
-				card_cost = int(card_data.get("Cost", 0))
+		if card_being_dragged and card_being_dragged.has_method("get_current_cost"):
+			card_cost = card_being_dragged.get_current_cost()
 		if card_cost > 0 and game_manager_reference and game_manager_reference.has_method("spend_player_mana"):
 			var ok = game_manager_reference.spend_player_mana(current_player_id, card_cost)
 			if not ok:
@@ -238,8 +237,8 @@ func finish_drag():
 
 		# Queue for resolve phase (abilities fire when card flips during resolve)
 		played_cards_order.append(card_being_dragged)
-		# Also add to persistent play order
-		all_cards_in_play_order.append(card_being_dragged)
+		# Also add to persistent play order (duplicate-safe: handles recall+replay)
+		add_card_to_play_order(card_being_dragged)
 		# Track as summoned (was_played_from_hand = true)
 		track_summoned_card(card_being_dragged, true)
 
@@ -520,6 +519,33 @@ func track_created_card(card, creator_player_id: int, creator_card_id: String) -
 		card.card_id, creator_card_id, creator_player_id, current_turn, created_cards.size()])
 
 
+func adjust_cost(cards, delta: int) -> void:
+	"""Adjust the mana cost of one or more cards by delta (negative = cheaper, positive = more expensive).
+	Accepts a single card Node or an Array of card Nodes.
+	Cost is clamped to minimum 0 by get_current_cost()."""
+	var card_list: Array = cards if cards is Array else [cards]
+	for card in card_list:
+		if not is_instance_valid(card):
+			continue
+		card.cost_modifier += delta
+		_update_cost_label(card)
+
+
+func _update_cost_label(card: Node) -> void:
+	"""Refresh the CardFront/Cost label to reflect the current cost with color coding.
+	Green = discounted, Red = increased, plain = base cost."""
+	var cost_label = card.get_node_or_null("CardFront/Cost")
+	if not cost_label:
+		return
+	var current_cost = card.get_current_cost()
+	if card.cost_modifier < 0:
+		cost_label.text = "[color=green]%d[/color]" % current_cost
+	elif card.cost_modifier > 0:
+		cost_label.text = "[color=red]%d[/color]" % current_cost
+	else:
+		cost_label.text = str(current_cost)
+
+
 func track_recalled_card(card: Node, recaller_player_id: int, recaller_card_id: String) -> void:
 	"""Record a recall triggered by a card ability.
 	recaller_player_id: which player's card triggered the recall.
@@ -609,12 +635,16 @@ func trigger_game_end_abilities() -> void:
 	var sorted_cards := _sort_cards_by_flip_first(all_cards_in_play_order)
 
 	# First pass — every card fires once (normal)
+	var game_end_fired: Dictionary = {}  # Guard against duplicate entries in all_cards_in_play_order
 	for card in sorted_cards:
 		if not is_instance_valid(card):
 			continue
 		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
 		if not card.card_slot_is_in:
 			continue
+		if game_end_fired.has(card):  # Skip if already fired (handles recall+replay duplicates)
+			continue
+		game_end_fired[card] = true
 		if card.has_method("on_game_end"):
 			var did_fire = await card.on_game_end()
 			# Wait for any level-up triggered by this ability before continuing

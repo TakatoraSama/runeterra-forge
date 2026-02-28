@@ -8,7 +8,9 @@ var card_slot_is_in
 var card_id: String = ""
 var owner_player_id: int = -1  # Which player owns this card (0 = top, 1 = bottom)
 var power_modifier: int = 0  # Runtime power buff/debuff applied to base power
+var _display_card_id: String = ""  # Visual-only id used while a level-up is queued but not yet animating
 var aura_power_modifier: int = 0  # Aura-based power buff/debuff (recalculated when board changes, not permanent)
+var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, positive = more expensive)
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 
 # Cached scene-tree references (set in _ready). Null for preview-only instances.
@@ -69,11 +71,40 @@ func _on_animation_finished(anim_name: StringName) -> void:
 
 
 func get_current_power() -> int:
-	"""Returns the card's current power (base + permanent modifier + aura modifier)."""
-	var card_data = CardDatabase.CARDS.get(card_id)
+	"""Returns the card's current power (base + permanent modifier + aura modifier).
+	Uses _display_card_id when set so queued level-ups don't show future stats prematurely."""
+	var lookup_id = _display_card_id if _display_card_id != "" else card_id
+	var card_data = CardDatabase.CARDS.get(lookup_id)
 	if not card_data or not card_data.has("Power"):
 		return 0
 	return int(card_data.get("Power", 0)) + power_modifier + aura_power_modifier
+
+
+func get_current_cost() -> int:
+	"""Returns the card's current cost (base + modifier), clamped to minimum 0."""
+	var card_data = CardDatabase.CARDS.get(card_id)
+	if not card_data:
+		return 0
+	return max(0, int(card_data.get("Cost", 0)) + cost_modifier)
+
+
+func get_total_power_modifier() -> int:
+	"""Returns the combined permanent + aura power modifier.
+	Used for level-up threshold checks that count both sources."""
+	return power_modifier + aura_power_modifier
+
+
+func get_power_display_text_for_base(base_power: int) -> String:
+	"""Like get_power_display_text() but uses a given base power instead of card_id.
+	Used by populate_card_visuals() so the correct card_data power is shown
+	even when card_id has already been updated for a queued level-up."""
+	var value = base_power + power_modifier + aura_power_modifier
+	var total_modifier = power_modifier + aura_power_modifier
+	if total_modifier > 0:
+		return "[color=green]%d[/color]" % value
+	elif total_modifier < 0:
+		return "[color=red]%d[/color]" % value
+	return str(value)
 
 
 func get_power_display_text() -> String:
@@ -180,6 +211,12 @@ func _perform_level_up(new_card_id: String) -> void:
 	# Update identity immediately so callers reading card_id see the new value
 	card_id = new_card_id
 
+	# Freeze the visual display at the currently-visible level while this level-up
+	# waits in the animation queue. Prevents AuraSystem label refreshes and other
+	# mid-round power recalcs from showing the future level's stats prematurely.
+	if _display_card_id == "":
+		_display_card_id = old_id
+
 	# Notify opponent: only broadcast for locally-owned cards to prevent echo
 	if _card_manager and _card_manager._is_online() \
 			and owner_player_id == _card_manager.current_player_id:
@@ -190,6 +227,9 @@ func _perform_level_up(new_card_id: String) -> void:
 		while _card_manager._level_up_in_progress:
 			await get_tree().create_timer(0.05).timeout
 		_card_manager._level_up_in_progress = true
+
+	# Animation is starting — advance display to show this level's stats now
+	_display_card_id = new_card_id
 
 	# ── 1. Fly to screen centre and scale up to 0.5 simultaneously (1 sec) ─
 	var original_global_pos := global_position
@@ -214,56 +254,7 @@ func _perform_level_up(new_card_id: String) -> void:
 	await get_tree().create_timer(1.5).timeout
 
 	# ── 3. Update visuals mid-spin ────────────────────────────────────────
-	var name_label = get_node_or_null("CardFront/TextContainer/CardName")
-	if name_label:
-		name_label.text = str(new_data.get("Name", ""))
-
-	var cost_label = get_node_or_null("CardFront/Cost")
-	if cost_label:
-		cost_label.text = str(new_data.get("Cost", 0))
-
-	CardDatabase.apply_power_visual(self, new_data, self)
-
-	var skill_label = get_node_or_null("CardFront/TextContainer/Skill")
-	if skill_label:
-		skill_label.text = CardDatabase.format_card_text(str(new_data.get("Skill", "")), new_data.get("BalanceValues", {}))
-
-	var levelup_label = get_node_or_null("CardFront/TextContainer/LevelUp")
-	var levelup_separator = get_node_or_null("CardFront/TextContainer/LevelSeperator")
-	var new_level_up_text = new_data.get("LevelUp", "")
-	if new_level_up_text and str(new_level_up_text) != "":
-		if levelup_label:
-			levelup_label.text = CardDatabase.format_card_text(str(new_level_up_text), new_data.get("BalanceValues", {}))
-			levelup_label.visible = true
-		if levelup_separator:
-			levelup_separator.visible = true
-	else:
-		if levelup_label:
-			levelup_label.text = ""
-			levelup_label.visible = false
-		if levelup_separator:
-			levelup_separator.visible = false
-
-	var sprite_node = get_node_or_null("CardFront/CardSpriteParent/CardSprite")
-	if sprite_node:
-		var sprite_path = new_data.get("Sprite", "")
-		if sprite_path != "":
-			sprite_node.texture = ResourceLoader.load(sprite_path)
-
-	var subtype_label = get_node_or_null("CardFront/SubType")
-	var subtype_bg = get_node_or_null("CardFront/CardSubType")
-	var new_sub_type = str(new_data.get("SubType", ""))
-	if new_sub_type != "":
-		if subtype_label:
-			subtype_label.text = new_sub_type.to_upper()
-			subtype_label.visible = true
-		if subtype_bg:
-			subtype_bg.visible = true
-	else:
-		if subtype_label:
-			subtype_label.visible = false
-		if subtype_bg:
-			subtype_bg.visible = false
+	CardDatabase.populate_card_visuals(self, new_data, self)
 
 	# ── 4. Wait for spin animation to finish ────────────────────────────
 	await animation_player.animation_finished
@@ -288,6 +279,7 @@ func _perform_level_up(new_card_id: String) -> void:
 	# ── 7. Release global level-up lock ──────────────────────────────────
 	if _card_manager:
 		_card_manager._level_up_in_progress = false
+	_display_card_id = ""  # clear: card_id is now the final value, no override needed
 
 	var new_name = new_data.get("Name", new_card_id)
 	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [

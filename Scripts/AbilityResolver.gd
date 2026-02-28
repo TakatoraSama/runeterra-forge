@@ -781,9 +781,11 @@ func execute_swap_arrive_ability(card: Node, to_zone: Vector2i) -> void:
 
 func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
 	"""Ahri {Swap Lane}: recall the weakest resolved ally at the destination zone.
-	The recalled ally is returned to its owner's hand. Landmarks are excluded."""
-	var board := _get_board()
-	var cm    := _get_card_manager()
+	The recalled ally is returned to its owner's hand. Landmarks are excluded.
+	Ahri Lv2 additionally reduces the recalled card's cost by recall_cost_reduction."""
+	var board      := _get_board()
+	var cm         := _get_card_manager()
+	var card_data  := CardDatabase.CARDS.get(card.card_id, {}) as Dictionary
 	if not board or not cm:
 		return
 
@@ -802,7 +804,7 @@ func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
 		if card_type != "Champion" and card_type != "Follower":
 			continue
 		var power: float = c.get_current_power() if c.has_method("get_current_power") else 0.0
-		if power < weakest_power:
+		if power < weakest_power or (power == weakest_power and weakest_card != null and c.card_id < weakest_card.card_id):
 			weakest_power = power
 			weakest_card  = c
 
@@ -813,6 +815,12 @@ func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
 	print("Ahri swap-arrive recall: %s (power %d) from zone %s" % [
 		weakest_card.card_id, int(weakest_power), str(to_zone)])
 	await cm.recall_card(weakest_card, card.owner_player_id, card.card_id)
+
+	# Ahri Lv2: reduce the recalled card's cost (Ahri1 has no recall_cost_reduction key → 0)
+	var cost_reduction: int = int(card_data.get("BalanceValues", {}).get("recall_cost_reduction", 0))
+	if cost_reduction > 0 and is_instance_valid(weakest_card):
+		cm.adjust_cost(weakest_card, -cost_reduction)
+
 	LevelUpManager._check_ahri_levelup()
 	await cm._wait_for_level_up()
 

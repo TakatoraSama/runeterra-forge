@@ -332,7 +332,7 @@ const CARDS = {
 		"Skill": "Each round, when I {swap lane}, {recall} the weakest ally here and reduce its cost by {recall_cost_reduction}.",
 		"LevelUp": "",
 		"LevelUpTo": null,
-		"AbilityType": "",
+		"AbilityType": "swap_arrive_recall",
 		"BalanceValues": {"recall_cost_reduction": 1},
 		"PreviewTooltip": ["Ahri1", "Ahri2"]
 	},
@@ -549,6 +549,7 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	var skill_label = card.get_node_or_null("CardFront/TextContainer/Skill")
 	var skill_text: String = str(card_data.get("Skill", ""))
 	if skill_label && skill_text != "":
+		skill_label.visible = true
 		skill_label.text = format_card_text(skill_text, card_data.get("BalanceValues", {}))
 	else:
 		skill_label.visible = false
@@ -595,6 +596,9 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	var keyword_container = card.get_node_or_null("CardFront/TextContainer/KeywordContainer")
 	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
 
+	if keyword_container:
+		for child in keyword_container.get_children():
+			child.queue_free()
 	if keywords.size() > 0:
 		keyword_container.visible = true
 		for keyword in keywords:
@@ -720,8 +724,8 @@ static func apply_power_visual(card_node: Node, card_data: Dictionary, source_ca
 	if power_label:
 		power_label.visible = should_show_power
 		if should_show_power:
-			if source_card and source_card.has_method("get_power_display_text"):
-				power_label.text = source_card.get_power_display_text()
+			if source_card and source_card.has_method("get_power_display_text_for_base"):
+				power_label.text = source_card.get_power_display_text_for_base(int(card_data.get("Power", 0)))
 			else:
 				power_label.text = str(card_data.get("Power", 0))
 		else:

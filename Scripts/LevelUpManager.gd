@@ -36,7 +36,7 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	Checks whether the newly revealed card triggers a level-up for any champion."""
 	if not is_instance_valid(resolved_card):
 		return
-	_check_trundle_levelup(resolved_card)
+	_check_trundle_levelup(resolved_card.owner_player_id)
 	_check_azir_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
@@ -66,12 +66,28 @@ func check_level_up_by_power(card: Node) -> void:
 	# Only applies to cards whose on-board buff tracks towards a level-up.
 	if card_data.get("AbilityType", "") == "conditional_buff" and card_data.get("Level", 1) == 1:
 		var power_threshold: int = int(card_data.get("BalanceValues", {}).get("power_threshold", 4))
-		if card.power_modifier >= power_threshold:
+		if card.get_total_power_modifier() >= power_threshold:
 			print("%s met level-up condition! (power_modifier=%d >= %d)" % [
 				card_data.get("Name", card.card_id), card.power_modifier, power_threshold])
 			card._perform_level_up(str(level_up_to))
 			# If Sun Disc is already restored, immediately push to lv3.
 			_check_ascended_sun_disc_upgrade(card)
+
+
+func check_conditional_buff_level_ups() -> void:
+	"""Called after every aura recalculation to catch level-ups triggered by
+	aura changes (e.g. Azir lv2 pushing Renekton over his power threshold).
+	Loops all resolved board cards and re-checks the power threshold for any
+	conditional_buff lv1 card (currently only Renekton lv1)."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		check_level_up_by_power(card)
 
 
 # ─── Sun Disc helpers ──────────────────────────────────────────────────────────
@@ -168,20 +184,27 @@ func _check_azir_levelup() -> void:
 		_check_ascended_sun_disc_upgrade(azir_card)
 
 
-func _check_trundle_levelup(resolved_card: Node) -> void:
-	"""Trundle lv1 → lv2: levels up when the player resolves an Ice Pillar."""
+func _check_trundle_levelup(owner_player_id: int) -> void:
+	"""Trundle lv1 → lv2: levels up when the player has played an Ice Pillar from hand."""
 	var cm := _get_card_manager()
 	if not cm:
 		return
 
-	var resolved_data = CardDatabase.CARDS.get(resolved_card.card_id)
-	if not resolved_data or resolved_data.get("Name", "") != "Ice Pillar":
+	# Check summoned_cards history for Ice Pillar played from hand by this player
+	var ice_pillar_played = false
+	for entry in cm.summoned_cards:
+		if entry["card_id"] == "IcePillar" \
+				and entry["owner_player_id"] == owner_player_id \
+				and entry["was_played_from_hand"]:
+			ice_pillar_played = true
+			break
+
+	if not ice_pillar_played:
 		return
 
-	var owner_id: int = resolved_card.owner_player_id
-
+	# Find Trundle (lv1) currently on board for this player
 	for card in cm.all_cards_in_play_order:
-		if not is_instance_valid(card) or card.owner_player_id != owner_id:
+		if not is_instance_valid(card) or card.owner_player_id != owner_player_id:
 			continue
 		if not card.card_slot_is_in:  # card removed from board
 			continue
@@ -191,7 +214,7 @@ func _check_trundle_levelup(resolved_card: Node) -> void:
 		if card_data.get("Name", "") == "Trundle" and card_data.get("AbilityType", "") == "create_card":
 			var level_up_to = card_data.get("LevelUpTo", "")
 			if level_up_to and str(level_up_to) != "":
-				print("Ice Pillar resolved — Trundle levels up!")
+				print("Ice Pillar played — Trundle levels up!")
 				card._perform_level_up(str(level_up_to))
 				_notify_zone_power_changed()
 
