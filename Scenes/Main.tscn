@@ -17,6 +17,10 @@
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_fos0i"]
 size = Vector2(126, 176)
 
+[sub_resource type="Environment" id="Environment_frkhe"]
+background_mode = 3
+glow_enabled = true
+
 [node name="Main" type="Node2D" unique_id=1472749471]
 
 [node name="CardManager" type="Node2D" parent="." unique_id=78849771]
@@ -133,3 +137,6 @@ theme_override_font_sizes/normal_font_size = 100
 text = "VICTORY"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=239596555]
+environment = SubResource("Environment_frkhe")

@@ -66,6 +66,15 @@ func _ready() -> void:
 	game_manager_reference = $"../GameManager"
 	network_manager_reference = $"../NetworkManager"
 	$"../InputManager".connect("left_mouse_button_released", on_left_click_released)
+	game_manager_reference.mana_changed.connect(_on_mana_changed)
+
+func _on_mana_changed(player_id: int, current_mana: int, _max_mana: int) -> void:
+	if player_id != current_player_id:
+		return
+	for card in player_hand_reference.player_hand:
+		if is_instance_valid(card) and card.has_method("update_glow"):
+			card.update_glow(current_mana)
+
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
@@ -241,6 +250,9 @@ func finish_drag():
 		add_card_to_play_order(card_being_dragged)
 		# Track as summoned (was_played_from_hand = true)
 		track_summoned_card(card_being_dragged, true)
+		# Card left hand — hide its glow
+		card_being_dragged.is_in_hand = false
+		card_being_dragged.hide_glow()
 
 		# Multiplayer: notify opponent about this card play (face-down)
 		if _is_online() and zone_key != Vector2i(-1, -1):
@@ -454,6 +466,9 @@ func create_card_in_hand(card_id_to_create: String, creator_card_id: String = ""
 
 	# Add to hand — this tweens the card from screen center to the hand position
 	player_hand_reference.add_card_to_hand(new_card, 0.3)
+	new_card.is_in_hand = true
+	var current_mana: int = game_manager_reference.get_player_current_mana(current_player_id)
+	new_card.update_glow(current_mana)
 
 	# Track as created card if creator info provided
 	if creator_card_id != "":
@@ -529,6 +544,9 @@ func adjust_cost(cards, delta: int) -> void:
 			continue
 		card.cost_modifier += delta
 		_update_cost_label(card)
+		if game_manager_reference and card.has_method("update_glow"):
+			var current_mana: int = game_manager_reference.get_player_current_mana(current_player_id)
+			card.update_glow(current_mana)
 
 
 func _update_cost_label(card: Node) -> void:

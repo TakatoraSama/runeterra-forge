@@ -81,6 +81,10 @@ func draw_card() -> void:
 	new_card.name = "Card"
 	$"../PlayerHand".add_card_to_hand(new_card, CARD_DRAW_SPEED)
 	new_card.get_node("AnimationPlayer").play("card_flip")
+	new_card.is_in_hand = true
+	var gm = get_node_or_null("/root/Main/GameManager")
+	if gm:
+		new_card.update_glow(gm.get_player_current_mana(new_card.owner_player_id))
 
 
 # --- Draw specific cards by ID from the deck (e.g. Restored Sun Disc pulling Ascended) ---
@@ -114,4 +118,8 @@ func draw_specific_cards(card_ids: Array) -> void:
 		new_card.name = "Card"
 		$"../PlayerHand".add_card_to_hand(new_card, CARD_DRAW_SPEED)
 		new_card.get_node("AnimationPlayer").play("card_flip")
+		new_card.is_in_hand = true
+		var gm = get_node_or_null("/root/Main/GameManager")
+		if gm:
+			new_card.update_glow(gm.get_player_current_mana(new_card.owner_player_id))
 		print("Drew specific card from deck: %s (ID: %s)" % [drawn_data.Name, cid])
