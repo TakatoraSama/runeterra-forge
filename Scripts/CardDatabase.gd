@@ -450,6 +450,82 @@ const CARDS = {
 		"BalanceValues": {"power_increase": 1},
 		"PreviewTooltip": ["Sion1", "Sion2"]
 	},
+
+	# Champions - Leona line
+	"Leona1": {
+		"Name": "Leona",
+		"Region": ["Targon"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Leona1.webp",
+		"Level": 1,
+		"Cost": 3,
+		"Power": 5,
+		"Keyword": ["Tough"],
+		"Skill": "{Daybreak}: {Stun} the strongest enemy here.",
+		"LevelUp": "You've activated {Daybreak} {daybreak_threshold}+ times.",
+		"LevelUpTo": "Leona2",
+		"AbilityType": "",
+		"BalanceValues": {"daybreak_threshold": 3},
+		"PreviewTooltip": ["Leona1", "Leona2"]
+	},
+	"Leona2": {
+		"Name": "Leona",
+		"Region": ["Targon"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Leona2.webp",
+		"Level": 2,
+		"Cost": 3,
+		"Power": 5,
+		"Keyword": ["Challenger"],
+		"Skill": "{Daybreak} or when you activate another {Daybreak}: {Stun} the strongest enemy.",
+		"LevelUp": "You've activated {Daybreak} {daybreak_threshold}+ times.",
+		"LevelUpTo": "Leona2",
+		"AbilityType": "",
+		"BalanceValues": {"daybreak_threshold": 3},
+		"PreviewTooltip": ["Leona1", "Leona2"]
+	},
+
+	# Champions - Diana line
+	"Diana1": {
+		"Name": "Diana",
+		"Region": ["Targon"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Diana1.webp",
+		"Level": 1,
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": [],
+		"Skill": "{Nightfall} or when you activate another {Nightfall}: Grant me {Challenger}. [br] If I already have it, activate my {Challenger} instead.",
+		"LevelUp": "You've activated {Nightfall} {nightfall_threshold}+ times.",
+		"LevelUpTo": "Diana2",
+		"AbilityType": "",
+		"BalanceValues": {"nightfall_threshold": 3},
+		"PreviewTooltip": ["Diana1", "Diana2"]
+	},
+	"Diana2": {
+		"Name": "Diana",
+		"Region": ["Targon"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Diana2.webp",
+		"Level": 2,
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": ["Challenger"],
+		"Skill": "{Nightfall} or when you activate another {Nightfall}: Activate my {Challenger} and grant me +{power_increase} Power.",
+		"LevelUp": "",
+		"LevelUpTo": "Diana2",
+		"AbilityType": "",
+		"BalanceValues": {"power_increase": 2},
+		"PreviewTooltip": ["Diana1", "Diana2"]
+	},
 	
 	# Landmarks
 	"BuriedSunDisc": {
@@ -529,7 +605,7 @@ const CARDS = {
 		"BalanceValues": {"aura_power": 1},
 		"PreviewTooltip": ["Irelia1", "Irelia2", "Blade"]
 	},
-		"NavoriConspirator": {
+	"NavoriConspirator": {
 		"Name": "Navori Conspirator",
 		"Region": ["Ionia"],
 		"Type": "Follower",
@@ -544,7 +620,7 @@ const CARDS = {
 		"BalanceValues": {"aura_power": 1},
 		"PreviewTooltip": ["NavoriConspirator"]
 	},
-		"SolitaryMonk": {
+	"SolitaryMonk": {
 		"Name": "Solitary Monk",
 		"Region": ["Ionia"],
 		"Type": "Follower",

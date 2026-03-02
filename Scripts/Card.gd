@@ -14,7 +14,6 @@ var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, posit
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 var is_in_hand: bool = false   # True while this card is in the local player's hand
 var runtime_keywords: Array = []  # Runtime-applied keywords (e.g. Stun). Not from CardDatabase.
-var glow_outline: Sprite2D = null  # Blue glow sprite shown when card is affordable
 
 # Cached scene-tree references (set in _ready). Null for preview-only instances.
 var _board: Node = null
@@ -37,18 +36,6 @@ func _ready() -> void:
 	_board = get_node_or_null("/root/Main/Board")
 	_card_manager = get_node_or_null("/root/Main/CardManager")
 	_game_manager = get_node_or_null("/root/Main/GameManager")
-	# Create glow outline node (blue pulsing border shown when card is affordable)
-	var glow_node := Sprite2D.new()
-	glow_node.name = "GlowOutline"
-	glow_node.texture = preload("res://Assets/CardComponent/card_back.png")
-	glow_node.z_index = -12  # Behind CardBase (z_index = -11)
-	glow_node.scale = Vector2(1.08, 1.08)  # Larger so glow border extends outside card edge
-	glow_node.visible = false
-	var shader_mat := ShaderMaterial.new()
-	shader_mat.shader = preload("res://Assets/CardComponent/card_glow_outline.gdshader")
-	glow_node.material = shader_mat
-	$"CardFront".add_child(glow_node)
-	glow_outline = glow_node
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -61,14 +48,16 @@ func _set_card_back_hidden() -> void:
 
 
 func update_glow(current_mana: int) -> void:
-	if not glow_outline:
+	if not is_in_hand:
 		return
-	glow_outline.visible = is_in_hand and (get_current_cost() <= current_mana)
+	if get_current_cost() <= current_mana:
+		modulate = Color(1, 1, 1, 1)
+	else:
+		modulate = Color(0.5, 0.5, 0.5, 1)
 
 
 func hide_glow() -> void:
-	if glow_outline:
-		glow_outline.visible = false
+	modulate = Color(1, 1, 1, 1)
 
 
 func hide_card_back() -> void:
