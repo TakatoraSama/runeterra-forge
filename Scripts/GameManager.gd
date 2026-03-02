@@ -243,6 +243,8 @@ func _proceed_to_resolve() -> void:
 	await _swap_lane_phase()
 
 	_set_round_phase(RoundPhase.RESOLVE)
+	seed(turn_number * 7919 + flip_first_player_id * 1337)  # Sync RNG so both clients pick identical ability targets
+	StunManager.on_resolve_start(turn_number)  # Expire stuns from previous turns
 	await _resolve_phase()
 
 	# Re-sync hand state after resolve so resolve-created cards (e.g. Trundle's Ice Pillar)

@@ -38,6 +38,19 @@ func _is_online() -> bool:
 	return false
 
 
+func pick_random_target(valid_targets: Array) -> Node:
+	"""Return a random resolved entry from valid_targets, or null if none.
+	Both clients produce the same result because the resolve-phase RNG
+	is seeded with shared state (turn_number + flip_first_player_id)
+	before any abilities fire. All ability random picks must use this
+	function instead of inline randi().
+	Only cards with is_resolved == true are eligible targets."""
+	var resolved := valid_targets.filter(func(t): return t.is_resolved)
+	if resolved.is_empty():
+		return null
+	return resolved[randi() % resolved.size()]
+
+
 # ─── Public phase dispatchers (called by Card.gd thin wrappers) ───────────────
 
 func execute_play_ability(card: Node) -> void:
@@ -62,6 +75,12 @@ func execute_play_ability(card: Node) -> void:
 			_ability_mana_ramp(card)
 		"drain_power":
 			_ability_drain_power(card)
+		"stun_enemy":
+			_ability_stun_enemy(card)
+		"recall_allies_same_lane":
+			await _ability_recall_allies_same_lane(card)
+		"recall_cost_allies":
+			await _ability_recall_cost_allies(card)
 		_:
 			pass  # no Play ability or unhandled type
 
@@ -211,6 +230,62 @@ func _ability_damage_enemies(card: Node) -> void:
 	print("Damage enemies ability triggered for card: ", card.card_id)
 
 
+func _ability_stun_enemy(card: Node) -> void:
+	"""Kennen {Play}: Stun a random enemy Champion/Follower in this lane.
+	Kennen Lv2 also applies -power_decrease Power to the target (data-driven)."""
+	var board := _get_board()
+	if not board or not card.card_slot_is_in:
+		return
+
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	# Collect valid targets: enemy Champions/Followers in the opposing zone
+	var valid_targets: Array = []
+	for enemy in board.get_cards_in_zone(board.get_opposing_zone(zone_key)):
+		if not is_instance_valid(enemy) or not enemy.card_slot_is_in:
+			continue
+		var target_data = CardDatabase.CARDS.get(enemy.card_id)
+		if not target_data:
+			continue
+		var target_type: String = target_data.get("Type", "")
+		if target_type != "Champion" and target_type != "Follower":
+			continue
+		valid_targets.append(enemy)
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	if valid_targets.is_empty():
+		print("%s {Play}: no valid targets to Stun" % my_name)
+		return
+
+	var target = pick_random_target(valid_targets)
+	if target == null:
+		print("No targetable unit")
+		return
+	var chosen_data = CardDatabase.CARDS.get(target.card_id)
+	var target_name: String = chosen_data.get("Name", target.card_id) if chosen_data else target.card_id
+
+	var gm := _get_game_manager()
+	var current_turn: int = gm.turn_number if gm else 0
+	StunManager.apply_stun(target, current_turn)
+	print("%s {Play}: Stunned %s" % [my_name, target_name])
+
+	# Optional power debuff (Kennen Lv2: power_decrease = 1; Lv1 has no power_decrease key)
+	var power_decrease: int = int(card_data.get("BalanceValues", {}).get("power_decrease", 0))
+	if power_decrease > 0:
+		target.power_modifier -= power_decrease
+		var power_label = target.get_node_or_null("CardFront/Power")
+		if power_label:
+			power_label.text = target.get_power_display_text()
+		print("%s {Play}: granted %s -%d Power (now %d)" % [
+			my_name, target_name, power_decrease, target.get_current_power()])
+
+
 func _ability_drain_power(card: Node) -> void:
 	"""Xerath lv1 {Play}: drain drain_power from every other Champion/Follower in this
 	lane (both sides).  Xerath gains the total amount actually drained."""
@@ -307,6 +382,100 @@ func _ability_mana_ramp(card: Node) -> void:
 	if gm and gm.has_method("add_temp_bonus_mana"):
 		gm.add_temp_bonus_mana(card.owner_player_id, bonus_amount)
 		print("%s grants +%d mana next turn" % [card_data.get("Name", ""), bonus_amount])
+
+
+func _ability_recall_allies_same_lane(card: Node) -> void:
+	"""NavoriConspirator {Play}: recall all other allied Champions/Followers in this lane.
+	Only runs on the card owner's client — the opponent is notified via RPC inside recall_card."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+	# Multiplayer guard: only the owner's client executes the recall.
+	# The opponent receives _receive_opponent_recall RPCs from recall_card() instead.
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	var my_name: String = card_data.get("Name", card.card_id) if card_data else card.card_id
+
+	# Collect targets first to avoid iterating a list that changes during recall
+	var targets: Array = []
+	for c in board.get_cards_in_zone(zone_key):
+		if not is_instance_valid(c) or c == card:
+			continue
+		if c.owner_player_id != card.owner_player_id:
+			continue
+		if not c.is_resolved:
+			continue
+		var target_data = CardDatabase.CARDS.get(c.card_id)
+		if not target_data:
+			continue
+		var target_type: String = target_data.get("Type", "")
+		if target_type != "Champion" and target_type != "Follower":
+			continue
+		targets.append(c)
+
+	if targets.is_empty():
+		print("%s {Play}: no allied units to recall" % my_name)
+		return
+
+	print("%s {Play}: recalling %d allied unit(s)" % [my_name, targets.size()])
+	for target in targets:
+		if is_instance_valid(target):
+			await cm.recall_card(target, card.owner_player_id, card.card_id)
+
+
+func _ability_recall_cost_allies(card: Node) -> void:
+	"""SolitaryMonk {Play}: recall all allied Champions/Followers with recall_cost base mana across all lanes.
+	Only runs on the card owner's client — the opponent is notified via RPC inside recall_card."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm:
+		return
+	# Multiplayer guard: only the owner's client executes the recall.
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var recall_cost: int = int(card_data.get("BalanceValues", {}).get("recall_cost", 1))
+	var my_name: String = card_data.get("Name", card.card_id)
+
+	# Collect targets across all allied zones first
+	var targets: Array = []
+	var ally_zones = board.get_ally_zones(card.owner_player_id)
+	for zone_key in ally_zones:
+		for c in board.get_cards_in_zone(zone_key):
+			if not is_instance_valid(c) or c == card:
+				continue
+			if c.owner_player_id != card.owner_player_id:
+				continue
+			if not c.is_resolved:
+				continue
+			var target_data = CardDatabase.CARDS.get(c.card_id)
+			if not target_data:
+				continue
+			var target_type: String = target_data.get("Type", "")
+			if target_type != "Champion" and target_type != "Follower":
+				continue
+			if int(target_data.get("Cost", 0)) == recall_cost:
+				targets.append(c)
+
+	if targets.is_empty():
+		print("%s {Play}: no %d-cost allied units to recall" % [my_name, recall_cost])
+		return
+
+	print("%s {Play}: recalling %d allied unit(s) with cost %d" % [my_name, targets.size(), recall_cost])
+	for target in targets:
+		if is_instance_valid(target):
+			await cm.recall_card(target, card.owner_player_id, card.card_id)
 
 
 # ─── Round Start abilities ─────────────────────────────────────────────────────
@@ -571,7 +740,10 @@ func _game_end_renekton_debuff(card: Node, card_data: Dictionary) -> void:
 		print("%s Game End: no valid targets to debuff" % my_name)
 		return
 
-	var target            = valid_targets[randi() % valid_targets.size()]
+	var target            = pick_random_target(valid_targets)
+	if target == null:
+		print("No targetable unit")
+		return
 	var target_data       = CardDatabase.CARDS.get(target.card_id)
 	var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
 	var power_before: int = target.get_current_power()
@@ -622,7 +794,10 @@ func _ability_nasus_game_end_kill(card: Node) -> void:
 		print("%s Game End: no valid targets (no enemy has less Power than %d)" % [my_name, my_power])
 		return
 
-	var target            = valid_targets[randi() % valid_targets.size()]
+	var target            = pick_random_target(valid_targets)
+	if target == null:
+		print("No targetable unit")
+		return
 	var target_data       = CardDatabase.CARDS.get(target.card_id)
 	var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
 	var target_power: int = target.get_current_power()

@@ -13,6 +13,7 @@ var aura_power_modifier: int = 0  # Aura-based power buff/debuff (recalculated w
 var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, positive = more expensive)
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 var is_in_hand: bool = false   # True while this card is in the local player's hand
+var runtime_keywords: Array = []  # Runtime-applied keywords (e.g. Stun). Not from CardDatabase.
 var glow_outline: Sprite2D = null  # Blue glow sprite shown when card is affordable
 
 # Cached scene-tree references (set in _ready). Null for preview-only instances.
@@ -280,6 +281,7 @@ func _perform_level_up(new_card_id: String) -> void:
 
 	# ── 3. Update visuals mid-spin ────────────────────────────────────────
 	CardDatabase.populate_card_visuals(self, new_data, self)
+	_refresh_keyword_display()  # Re-apply runtime keywords (e.g. Stun badge) after visual rebuild
 
 	# ── 4. Wait for spin animation to finish ────────────────────────────
 	await animation_player.animation_finished
@@ -309,3 +311,42 @@ func _perform_level_up(new_card_id: String) -> void:
 	var new_name = new_data.get("Name", new_card_id)
 	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
 		old_name, old_name, old_id, new_name, new_card_id])
+
+
+# ── Runtime keyword management ─────────────────────────────────────────────
+
+func add_runtime_keyword(keyword_name: String) -> void:
+	"""Add a runtime keyword badge to this card. Ignores duplicates."""
+	if keyword_name in runtime_keywords:
+		return
+	runtime_keywords.append(keyword_name)
+	_refresh_keyword_display()
+
+
+func remove_runtime_keyword(keyword_name: String) -> void:
+	"""Remove a runtime keyword badge from this card. Safe to call if not present."""
+	if keyword_name in runtime_keywords:
+		runtime_keywords.erase(keyword_name)
+		_refresh_keyword_display()
+
+
+func _refresh_keyword_display() -> void:
+	"""Rebuild keyword sprites from static card data + runtime_keywords.
+	Mirrors CardDatabase.populate_card_visuals() keyword block so display is consistent."""
+	var keyword_container = get_node_or_null("CardFront/TextContainer/KeywordContainer")
+	if not keyword_container:
+		return
+	for child in keyword_container.get_children():
+		child.queue_free()
+	var card_data = CardDatabase.CARDS.get(card_id, {})
+	var all_keywords: Array = card_data.get("Keyword", []) + runtime_keywords
+	if all_keywords.size() > 0:
+		keyword_container.visible = true
+		var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
+		for keyword in all_keywords:
+			var item = keyword_item_scene.instantiate()
+			item.get_node("KeywordSprite").texture = ResourceLoader.load(
+				"res://Assets/KeywordSprites/" + str(keyword) + ".webp")
+			keyword_container.add_child(item)
+	else:
+		keyword_container.visible = false

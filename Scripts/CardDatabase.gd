@@ -340,7 +340,7 @@ const CARDS = {
 	# Champions - Kennen line
 	"Kennen1": {
 		"Name": "Kennen",
-		"Region": ["Bandle City","Ionia"],
+		"Region": ["Bandle City", "Ionia"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": true,
@@ -352,13 +352,13 @@ const CARDS = {
 		"Skill": "{Play}: {Stun} an enemy here.",
 		"LevelUp": "You've sumomoned the same ally {summon_threshold}+ times.",
 		"LevelUpTo": "Kennen2",
-		"AbilityType": "",
+		"AbilityType": "stun_enemy",
 		"BalanceValues": {"summon_threshold": 3},
 		"PreviewTooltip": ["Kennen1", "Kennen2"]
 	},
 	"Kennen2": {
 		"Name": "Kennen",
-		"Region": ["Bandle City","Ionia"],
+		"Region": ["Bandle City", "Ionia"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": false,
@@ -370,7 +370,7 @@ const CARDS = {
 		"Skill": "{Play}: {Stun} an enemy here and grant it -{power_decrease} Power.",
 		"LevelUp": "",
 		"LevelUpTo": "",
-		"AbilityType": "",
+		"AbilityType": "stun_enemy",
 		"BalanceValues": {"power_decrease": 1},
 		"PreviewTooltip": ["Kennen1", "Kennen2"]
 	},
@@ -528,6 +528,36 @@ const CARDS = {
 		"AbilityType": "none",
 		"BalanceValues": {"aura_power": 1},
 		"PreviewTooltip": ["Irelia1", "Irelia2", "Blade"]
+	},
+		"NavoriConspirator": {
+		"Name": "Navori Conspirator",
+		"Region": ["Ionia"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/DummySprite.webp",
+		"Cost": 2,
+		"Power": 4,
+		"Keyword": [],
+		"Skill": "{Play}: {Recall} other allies here.",
+		"AbilityType": "recall_allies_same_lane",
+		"BalanceValues": {"aura_power": 1},
+		"PreviewTooltip": ["NavoriConspirator"]
+	},
+		"SolitaryMonk": {
+		"Name": "Solitary Monk",
+		"Region": ["Ionia"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/DummySprite.webp",
+		"Cost": 2,
+		"Power": 4,
+		"Keyword": [],
+		"Skill": "{Play}: {Recall} {recall_cost} cost allies.",
+		"AbilityType": "recall_cost_allies",
+		"BalanceValues": {"recall_cost": 1},
+		"PreviewTooltip": ["SolitaryMonk"]
 	},
 }
 

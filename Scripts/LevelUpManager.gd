@@ -41,6 +41,7 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_xerath_levelup()
 	_check_nasus_levelup()
 	_check_ahri_levelup()
+	_check_kennen_levelup()
 	_check_sun_disc_transform()
 
 
@@ -51,6 +52,7 @@ func check_level_ups_after_abilities() -> void:
 	_check_xerath_levelup()
 	_check_nasus_levelup()
 	_check_ahri_levelup()
+	_check_kennen_levelup()
 	_check_sun_disc_transform()
 
 
@@ -335,6 +337,55 @@ func _check_ahri_levelup() -> void:
 			print("Ahri lv1 has recalled %d allies — leveling up to lv2!" % recall_count)
 			ahri_card._perform_level_up(str(level_up_to))
 			_notify_zone_power_changed()
+
+
+func _check_kennen_levelup() -> void:
+	"""Kennen lv1 → lv2: levels up when the owning player has summoned the same
+	ally summon_threshold+ times (any single card_id with >= threshold entries)."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+
+	for kennen_card in cm.all_cards_in_play_order:
+		if not is_instance_valid(kennen_card) or not kennen_card.is_resolved:
+			continue
+		if not kennen_card.card_slot_is_in:
+			continue
+		var kennen_data = CardDatabase.CARDS.get(kennen_card.card_id)
+		if not kennen_data:
+			continue
+		if kennen_data.get("Name", "") != "Kennen" or kennen_data.get("Level", 1) != 1:
+			continue
+
+		var owner_id: int = kennen_card.owner_player_id
+		var summon_threshold: int = int(kennen_data.get("BalanceValues", {}).get("summon_threshold", 3))
+
+		# Count occurrences of each card_id summoned by this player
+		var id_counts: Dictionary = {}
+		for entry in cm.summoned_cards:
+			if int(entry.get("owner_player_id", -1)) != owner_id:
+				continue
+			var sid: String = entry.get("card_id", "")
+			id_counts[sid] = id_counts.get(sid, 0) + 1
+
+		# Check if any single ally was summoned threshold+ times
+		var qualifying_id: String = ""
+		for sid in id_counts:
+			if id_counts[sid] >= summon_threshold:
+				qualifying_id = sid
+				break
+
+		if qualifying_id.is_empty():
+			continue
+
+		var level_up_to = kennen_data.get("LevelUpTo", "")
+		if not level_up_to or str(level_up_to) == "":
+			continue
+
+		print("Kennen lv1: '%s' was summoned %d times — leveling up!" % [
+			qualifying_id, id_counts[qualifying_id]])
+		kennen_card._perform_level_up(str(level_up_to))
+		_notify_zone_power_changed()
 
 
 func _check_sun_disc_transform() -> void:

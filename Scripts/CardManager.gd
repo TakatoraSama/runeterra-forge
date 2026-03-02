@@ -98,6 +98,8 @@ func start_drag(card):
 			return
 		if SwapLaneManager.has_pending_swap(card):
 			return
+		if StunManager.has_stun(card):  # Stunned cards cannot self-swap
+			return
 		# Initiate swap drag: temporarily free the origin slot
 		_is_swap_drag = true
 		_swap_drag_origin_slot = card.card_slot_is_in
@@ -299,8 +301,9 @@ func resolve_played_cards() -> void:
 		# Mark card as resolved before triggering abilities so other cards
 		# can see it, but cards later in the queue remain unresolved.
 		card.is_resolved = true
-		# Trigger ability after reveal/flip animation
-		card.on_summon()
+		# Trigger ability after reveal/flip animation (await so multi-step abilities
+		# like mass-recall fully complete before the next card flips)
+		await card.on_summon()
 		# Check if this resolve triggers any level-ups (e.g. Ice Pillar → Trundle)
 		check_level_ups_after_resolve(card)
 		# Wait for any level-up animation triggered by this resolve to finish
@@ -432,6 +435,9 @@ func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = 
 
 	await scale_tween.finished
 	card.z_index = 2
+	card.is_in_hand = true
+	var current_mana: int = game_manager_reference.get_player_current_mana(current_player_id)
+	card.update_glow(current_mana)
 	print("Recalled: %s to player %d's hand" % [card.card_id, card.owner_player_id])
 	if recaller_card_id != "":
 		track_recalled_card(card, recaller_player_id, recaller_card_id)
@@ -612,6 +618,8 @@ func trigger_round_start_abilities() -> void:
 		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
 		if not card.card_slot_is_in:
 			continue
+		if StunManager.has_stun(card):  # Stunned cards skip round start
+			continue
 		if card.has_method("on_round_start"):
 			var did_fire = await card.on_round_start()
 			# Wait for any level-up triggered by this ability before continuing
@@ -632,6 +640,8 @@ func trigger_round_end_abilities() -> void:
 			continue
 		# Re-check: card may have been killed by a prior ability this phase (slot is cleared on kill)
 		if not card.card_slot_is_in:
+			continue
+		if StunManager.has_stun(card):  # Stunned cards skip round end
 			continue
 		if card.has_method("on_round_end"):
 			var did_fire = await card.on_round_end()

@@ -90,7 +90,7 @@ const KEYWORDS = {
 		"Positive": true
 	},
 	"Stun": {
-		"Description": "Stunned units cannot activate their Round End or Round Start effects. Remove this keyword at round end.",
+		"Description": "Stunned units cannot activate their Round End, Round Start, Elusive effects. Remove this keyword at play next resolve phase.",
 		"Sprite": "res://Assets/KeywordSprites/Stun.webp",
 		"Stackable": false,
 		"Generatable": false,
