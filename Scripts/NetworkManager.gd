@@ -18,6 +18,7 @@ var player_to_peer: Dictionary = {}
 var local_player_id: int = 1  # Always 1 for local view (bottom side)
 var is_host: bool = false
 var players_ready: Dictionary = {}  # peer_id -> bool
+var _offline_mode: bool = false
 
 
 func _ready() -> void:
@@ -168,6 +169,7 @@ func _notify_game_can_start() -> void:
 # --- Offline / Solo mode ---
 func start_offline() -> void:
 	"""Start in offline mode (no networking, single player testing)"""
+	_offline_mode = true
 	is_host = true
 	local_player_id = 1
 	peer_to_player[1] = 0  # Fake host
@@ -177,4 +179,6 @@ func start_offline() -> void:
 
 func is_online() -> bool:
 	"""Check if we're in a multiplayer session"""
+	if _offline_mode:
+		return false
 	return multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED

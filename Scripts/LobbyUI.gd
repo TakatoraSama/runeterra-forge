@@ -60,6 +60,7 @@ func _on_offline_pressed() -> void:
 	if not network_manager:
 		return
 	network_manager.start_offline()
+	BotManager.bot_enabled = true
 	status_label.text = "Starting offline..."
 	_start_game()
 

@@ -128,6 +128,10 @@ func start_game() -> void:
 	if deck_reference and deck_reference.has_method("draw_cards"):
 		deck_reference.draw_cards(initial_draw_count)
 
+	# Bot mode: initialize bot after the human player's initial draw
+	if BotManager.bot_enabled:
+		BotManager.setup_bot(initial_draw_count)
+
 	_update_ui_indicators()
 	start_next_turn()
 
@@ -183,6 +187,11 @@ func begin_round_start() -> void:
 	# --- Round Start: draw cards for the active player ---
 	if deck_reference and deck_reference.has_method("draw_cards"):
 		deck_reference.draw_cards(draw_per_turn)
+
+	# Bot: draw a card and synchronously queue its play for this round.
+	# Runs after mana is refilled so mana checks are correct.
+	if BotManager.bot_enabled:
+		BotManager.on_round_start()
 
 	# Leave ROUND_START as a real phase for triggers,
 	# then move into PLAY immediately.

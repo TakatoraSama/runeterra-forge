@@ -23,6 +23,7 @@ AuraSystem="*res://Scripts/AuraSystem.gd"
 LaneManager="*res://Scripts/LaneManager.gd"
 SwapLaneManager="*res://Scripts/SwapLaneManager.gd"
 StunManager="*res://Scripts/StunManager.gd"
+BotManager="*res://Scripts/BotManager.gd"
 
 [display]
 
