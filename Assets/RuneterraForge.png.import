@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bb8080fdo1ni6"
-path="res://.godot/imported/Legends_of_Runeterra_nav_icon.png-a83d3ef7d77fc80c32475a61f4b02e95.ctex"
+uid="uid://chdgumh6gf32f"
+path="res://.godot/imported/RuneterraForge.png-ff7107677e373c3220918b353bef9a54.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Legends_of_Runeterra_nav_icon.png"
-dest_files=["res://.godot/imported/Legends_of_Runeterra_nav_icon.png-a83d3ef7d77fc80c32475a61f4b02e95.ctex"]
+source_file="res://Assets/RuneterraForge.png"
+dest_files=["res://.godot/imported/RuneterraForge.png-ff7107677e373c3220918b353bef9a54.ctex"]
 
 [params]
 

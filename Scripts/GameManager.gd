@@ -107,7 +107,22 @@ func start_game() -> void:
 		emit_signal("flip_first_changed", flip_first_player_id)
 		print("Flip first assigned to player: ", flip_first_player_id)
 
+	# --- Game Start: shuffle deck and trigger game start abilities FIRST ---
+	# IMPORTANT: must happen before lane assignment so that lane-reveal effects
+	# (e.g. Hexcore Foundry's synchronous draw_cards call inside _fire_immediate_effects)
+	# cannot remove Azir1 from the deck before trigger_game_start_abilities() iterates it.
+	# In multiplayer the client skips _sync_lane_assignment locally (waits for server RPC),
+	# so game-start always runs before any lane effect on the client side — this reorder
+	# makes the host/offline path consistent with that.
+	if deck_reference and deck_reference.has_method("shuffle_deck"):
+		deck_reference.shuffle_deck()
+
+	# Trigger Game Start abilities (e.g. Azir → summon Buried Sun Disc)
+	if deck_reference and deck_reference.has_method("trigger_game_start_abilities"):
+		await deck_reference.trigger_game_start_abilities()
+
 	# --- Lane assignment: server picks, syncs to all clients ---
+	# Done AFTER game-start abilities so lane-reveal side effects fire in correct order.
 	if _is_online():
 		if multiplayer.is_server():
 			var lane_ids = board_reference.pick_random_lane_ids()
@@ -117,14 +132,7 @@ func start_game() -> void:
 		var lane_ids = board_reference.pick_random_lane_ids()
 		_sync_lane_assignment(lane_ids)
 
-	# --- Game Start: shuffle deck, trigger game start abilities, then draw initial hand ---
-	if deck_reference and deck_reference.has_method("shuffle_deck"):
-		deck_reference.shuffle_deck()
-	
-	# Trigger Game Start abilities (flip first player processes first)
-	if deck_reference and deck_reference.has_method("trigger_game_start_abilities"):
-		await deck_reference.trigger_game_start_abilities()
-	
+	# Draw initial hand after lane assignment
 	if deck_reference and deck_reference.has_method("draw_cards"):
 		deck_reference.draw_cards(initial_draw_count)
 
