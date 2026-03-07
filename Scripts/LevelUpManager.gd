@@ -38,6 +38,7 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 		return
 	_check_trundle_levelup(resolved_card.owner_player_id)
 	_check_azir_levelup()
+	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
 	_check_ahri_levelup()
@@ -49,6 +50,7 @@ func check_level_ups_after_abilities() -> void:
 	"""Called by CardManager after round-start / round-end ability loops complete.
 	Re-checks state-based conditions that may have been satisfied by ability effects."""
 	_check_azir_levelup()
+	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
 	_check_ahri_levelup()
@@ -186,6 +188,53 @@ func _check_azir_levelup() -> void:
 		_check_ascended_sun_disc_upgrade(azir_card)
 
 
+func _check_irelia_levelup() -> void:
+	"""Irelia lv1 → lv2: levels up when ally_threshold+ summoned allies
+	(Champions/Followers only, no Landmarks) are tracked in cm.summoned_cards."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+
+	for irelia_card in cm.all_cards_in_play_order:
+		if not is_instance_valid(irelia_card) or not irelia_card.is_resolved:
+			continue
+		if not irelia_card.card_slot_is_in:
+			continue
+		var irelia_data = CardDatabase.CARDS.get(irelia_card.card_id)
+		if not irelia_data:
+			continue
+		if irelia_data.get("Name", "") != "Irelia" or irelia_data.get("Level", 1) != 1:
+			continue
+
+		var owner_id: int = irelia_card.owner_player_id
+		var ally_threshold: int = int(irelia_data.get("BalanceValues", {}).get("ally_threshold", 6))
+		var count := 0
+
+		for summoned_entry in cm.summoned_cards:
+			if int(summoned_entry.get("owner_player_id", -1)) != owner_id:
+				continue
+			var summoned_card_id: String = summoned_entry.get("card_id", "")
+			if summoned_card_id == irelia_card.card_id:
+				continue  # Skip Irelia herself
+			var card_data = CardDatabase.CARDS.get(summoned_card_id)
+			if not card_data:
+				continue
+			var card_type: String = card_data.get("Type", "")
+			if card_type == "Champion" or card_type == "Follower":
+				count += 1  # No Landmarks (unlike Azir)
+
+		if count < ally_threshold:
+			continue
+
+		var level_up_to = irelia_data.get("LevelUpTo", "")
+		if not level_up_to or str(level_up_to) == "":
+			continue
+
+		print("Irelia has summoned %d allies — leveling up to lv2!" % count)
+		irelia_card._perform_level_up(str(level_up_to))
+		_notify_zone_power_changed()
+
+
 func _check_trundle_levelup(owner_player_id: int) -> void:
 	"""Trundle lv1 → lv2: levels up when the player has played an Ice Pillar from hand."""
 	var cm := _get_card_manager()
@@ -254,7 +303,7 @@ func _check_xerath_levelup() -> void:
 			var c_type: String = c_data.get("Type", "")
 			if c_type != "Champion" and c_type != "Follower":
 				continue
-			if card.power_modifier > 0:
+			if card.get_total_power_modifier() > 0:
 				buffed_count += 1
 
 		if buffed_count >= ally_threshold:

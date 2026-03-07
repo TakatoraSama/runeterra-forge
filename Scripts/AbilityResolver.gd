@@ -938,7 +938,7 @@ func _receive_opponent_game_start_summon(card_id_str: String, zone_col: int, zon
 
 # ─── Swap-arrive abilities ─────────────────────────────────────────────────────
 
-func execute_swap_arrive_ability(card: Node, to_zone: Vector2i) -> void:
+func execute_swap_arrive_ability(card: Node, to_zone: Vector2i, from_zone: Vector2i) -> void:
 	"""Called by SwapLaneManager after an Elusive card completes its swap tween.
 	Dispatches the card's swap-arrive ability, if any."""
 	if not is_instance_valid(card) or card.card_id == "":
@@ -950,6 +950,8 @@ func execute_swap_arrive_ability(card: Node, to_zone: Vector2i) -> void:
 	match ability_type:
 		"swap_arrive_recall":
 			await _ability_swap_arrive_recall(card, to_zone)
+		"swap_arrive_summon_blade":
+			await _ability_swap_arrive_summon_blade(card, from_zone)
 		_:
 			pass
 
@@ -998,6 +1000,104 @@ func _ability_swap_arrive_recall(card: Node, to_zone: Vector2i) -> void:
 
 	LevelUpManager._check_ahri_levelup()
 	await cm._wait_for_level_up()
+
+
+func _ability_swap_arrive_summon_blade(card: Node, from_zone: Vector2i) -> void:
+	"""Irelia {Swap Lane}: summon a Blade at the original (from) lane.
+	Runs only on the owning player's client; opponent is notified via RPC."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm:
+		return
+	var owner_id: int = card.owner_player_id
+
+	# Find first available slot in from_zone (Irelia has already left it)
+	var zone_slots: Array = board.slots_by_zone.get(from_zone, [])
+	var available_slot = null
+	for slot in zone_slots:
+		if not slot.card_in_slot:
+			available_slot = slot
+			break
+	if not available_slot:
+		print("Irelia swap-arrive: no slot for Blade in zone %s" % str(from_zone))
+		return
+
+	# Summon Blade (standard 8-step pattern)
+	var card_scene = preload("res://Scenes/Card.tscn")
+	var blade = card_scene.instantiate()
+	blade.card_id = "Blade"
+	blade.owner_player_id = owner_id
+	CardDatabase.populate_card_visuals(blade, CardDatabase.CARDS["Blade"])
+	blade.position = available_slot.position
+	blade.scale = Vector2(0.15, 0.15)
+	blade.z_index = 0
+	blade.card_slot_is_in = available_slot
+	blade.get_node("Area2D/CollisionShape2D").disabled = true
+	blade.is_resolved = true
+	blade.hide_card_back()
+
+	cm.add_child(blade)
+	available_slot.card_in_slot = true
+	board.add_card_to_zone(from_zone, blade)
+	cm.add_card_to_play_order(blade)
+	cm.track_summoned_card(blade, false)
+	cm.track_created_card(blade, owner_id, card.card_id)
+	cm._notify_zone_power_changed()
+
+	# Immediately check if Irelia can level up after the new Blade was tracked
+	LevelUpManager._check_irelia_levelup()
+	await cm._wait_for_level_up()
+
+	print("Irelia swap-arrive: Blade summoned at zone %s" % str(from_zone))
+
+	# Multiplayer: notify opponent to mirror-summon the Blade
+	if _is_online():
+		var mirrored := Vector2i(from_zone.x, 1 - from_zone.y)
+		rpc("_receive_opponent_irelia_blade_summon", mirrored.x, mirrored.y, owner_id, card.card_id)
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_irelia_blade_summon(zone_col: int, zone_row: int,
+		owner_player_id: int, creator_card_id: String) -> void:
+	"""Receive Irelia's Blade summon from the opponent's ability resolution."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm:
+		return
+
+	var zone_key := Vector2i(zone_col, zone_row)
+	var zone_slots: Array = board.slots_by_zone.get(zone_key, [])
+	var available_slot = null
+	for slot in zone_slots:
+		if not slot.card_in_slot:
+			available_slot = slot
+			break
+	if not available_slot:
+		print("Irelia blade RPC: no slot in zone %s" % str(zone_key))
+		return
+
+	var card_scene = preload("res://Scenes/Card.tscn")
+	var blade = card_scene.instantiate()
+	blade.card_id = "Blade"
+	blade.owner_player_id = owner_player_id
+	CardDatabase.populate_card_visuals(blade, CardDatabase.CARDS["Blade"])
+	blade.position = available_slot.position
+	blade.scale = Vector2(0.15, 0.15)
+	blade.z_index = 0
+	blade.card_slot_is_in = available_slot
+	blade.get_node("Area2D/CollisionShape2D").disabled = true
+	blade.is_resolved = true
+	blade.hide_card_back()
+
+	cm.add_child(blade)
+	available_slot.card_in_slot = true
+	board.add_card_to_zone(zone_key, blade)
+	cm.add_card_to_play_order(blade)
+	cm.track_summoned_card(blade, false)
+	cm.track_created_card(blade, owner_player_id, creator_card_id)
+	cm._notify_zone_power_changed()
+
+	print("Irelia blade RPC received: Blade at zone %s" % str(zone_key))
 
 
 # ─── Shared helpers ────────────────────────────────────────────────────────────

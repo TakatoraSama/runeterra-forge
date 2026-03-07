@@ -176,7 +176,7 @@ func execute_swaps() -> void:
 		# Both clients run execute_swaps(), but abilities must only resolve
 		# on the owning player's client to avoid double-recall RPCs.
 		if card.owner_player_id == card_manager.current_player_id:
-			await AbilityResolver.execute_swap_arrive_ability(card, to_zone)
+			await AbilityResolver.execute_swap_arrive_ability(card, to_zone, from_zone)
 			# In multiplayer: notify opponent that our ability (incl. level-up) is fully done.
 			if card_manager._is_online() and _has_ability:
 				card_manager.rpc("_rpc_notify_swap_step_done")
