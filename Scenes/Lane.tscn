@@ -10,6 +10,8 @@
 base_font = ExtResource("3_16efg")
 spacing_top = -4
 
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_tclnn"]
+
 [node name="Lane" type="Node2D" unique_id=942160807]
 
 [node name="LaneBorder" type="Sprite2D" parent="." unique_id=786331758]
@@ -47,7 +49,7 @@ grow_vertical = 0
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 2
 theme_override_fonts/normal_font = SubResource("FontVariation_at5c5")
-theme_override_font_sizes/normal_font_size = 12
+theme_override_font_sizes/normal_font_size = 16
 text = "Both Player draw 1."
 fit_content = true
 horizontal_alignment = 1
@@ -61,3 +63,9 @@ texture = ExtResource("2_o1qf5")
 [node name="LaneSprite" type="Sprite2D" parent="LaneBase" unique_id=1000977609]
 scale = Vector2(0.33, 0.33)
 texture = ExtResource("3_tclnn")
+
+[node name="Area2D" type="Area2D" parent="." unique_id=67873759]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Area2D" unique_id=183516508]
+scale = Vector2(10, 9)
+shape = SubResource("CapsuleShape2D_tclnn")

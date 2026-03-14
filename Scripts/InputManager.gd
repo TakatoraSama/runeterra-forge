@@ -3,13 +3,16 @@ extends Node2D
 signal left_mouse_button_clicked
 signal left_mouse_button_released
 signal card_right_clicked(card)
+signal lane_right_clicked(lane_id: String, reveal_turn: int)
 
 const COLLISION_MASK_CARD = 1
 const COLLISION_MASK_DECK = 4
+const COLLISION_MASK_LANE = 8
 
 var card_manager_reference
 var deck_reference
 var card_preview_reference  # Set in _ready; used to block game input while preview is open
+var lane_preview_reference
 var board_reference
 
 func _ready() -> void:
@@ -17,10 +20,13 @@ func _ready() -> void:
 	deck_reference = $"../Deck"
 	board_reference = $"../Board"
 	card_preview_reference = get_parent().get_node_or_null("CardPreview")
+	lane_preview_reference = get_parent().get_node_or_null("LanePreview")
 
 func _input(event):
-	# Block game-world input while the card preview overlay is open
+	# Block game-world input while any preview overlay is open
 	if card_preview_reference and card_preview_reference.visible:
+		return
+	if lane_preview_reference and lane_preview_reference.visible:
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -70,6 +76,19 @@ func _handle_right_click() -> void:
 		card = _get_in_play_card_at_cursor()
 	if card:
 		emit_signal("card_right_clicked", card)
+		return
+
+	# Lane detection fallback — only reached if no card was hit
+	var lane_params := PhysicsPointQueryParameters2D.new()
+	lane_params.position = get_global_mouse_position()
+	lane_params.collide_with_areas = true
+	lane_params.collision_mask = COLLISION_MASK_LANE
+	var lane_result := space_state.intersect_point(lane_params)
+	if lane_result.size() > 0:
+		var lane_node = lane_result[0].collider.get_parent()
+		if lane_node and lane_node.has_meta("lane_id"):
+			var reveal_turn: int = lane_node.get_meta("lane_reveal_turn", -1)
+			emit_signal("lane_right_clicked", lane_node.get_meta("lane_id"), reveal_turn)
 
 func _get_card_with_highest_z(results: Array):
 	var best = results[0].collider.get_parent()

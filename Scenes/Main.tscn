@@ -12,6 +12,7 @@
 [ext_resource type="PackedScene" path="res://Scenes/LobbyUI.tscn" id="10_lobby"]
 [ext_resource type="PackedScene" path="res://Scenes/SettingsUI.tscn" id="11_settings"]
 [ext_resource type="PackedScene" uid="uid://bmtjnfemn6vs4" path="res://Scenes/CardPreview.tscn" id="12_preview"]
+[ext_resource type="PackedScene" path="res://Scenes/LanePreview.tscn" id="13_lnprev"]
 [ext_resource type="FontFile" uid="uid://bh0252bjv1o3m" path="res://Fonts/beaufort/BeaufortforLOL-Bold.ttf" id="13_frkhe"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_fos0i"]
@@ -114,6 +115,8 @@ script = ExtResource("9_netmgr")
 [node name="SettingsUI" parent="." unique_id=472448276 instance=ExtResource("11_settings")]
 
 [node name="CardPreview" parent="." unique_id=1129544455 instance=ExtResource("12_preview")]
+
+[node name="LanePreview" parent="." instance=ExtResource("13_lnprev")]
 
 [node name="VictoryText" type="RichTextLabel" parent="." unique_id=2091700865]
 visible = false

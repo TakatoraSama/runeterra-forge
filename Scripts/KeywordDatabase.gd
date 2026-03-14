@@ -7,7 +7,7 @@ const KEYWORDS = {
 		"Stackable": false,
 		"Generatable": true,
 		"Transferable": true,
-		"Positive": true 
+		"Positive": true
 	},
 	"Barrier": {
 		"Description": "Negates the next {Kill} effect from the enemy. Remove this keyword at the next round end.",
@@ -96,5 +96,13 @@ const KEYWORDS = {
 		"Generatable": false,
 		"Transferable": false,
 		"Positive": false
+	},
+	"Deep": {
+		"Description": "You are Deep when you're running out of deck. When that happens, grant units with the Deep keyword +3 Power.",
+		"Sprite": "res://Assets/KeywordSprites/Deep.webp",
+		"Stackable": false,
+		"Generatable": false,
+		"Transferable": true,
+		"Positive": true
 	}
 }

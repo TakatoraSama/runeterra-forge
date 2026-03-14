@@ -94,6 +94,14 @@ func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
 		var lane_data: Dictionary = LaneDatabase.LANES.get(lane_id, {})
 		lane_data_by_col[col] = lane_data
 
+		# Register lane for right-click detection in InputManager
+		var lane_area := lane_instance.get_node_or_null("Area2D")
+		if lane_area:
+			lane_area.collision_layer = 8
+			lane_area.collision_mask = 0
+		lane_instance.set_meta("lane_id", lane_id)
+		lane_instance.set_meta("lane_reveal_turn", -1 if col == 0 else col + 1)
+
 		if col == 0:
 			_apply_lane_visuals(lane_instance, lane_data)
 		else:
@@ -138,6 +146,7 @@ func reveal_lane_visuals(col: int) -> void:
 	var lane_data: Dictionary = lane_data_by_col.get(col, {})
 	if lane_instance and is_instance_valid(lane_instance):
 		_apply_lane_visuals(lane_instance, lane_data)
+		lane_instance.set_meta("lane_reveal_turn", -1)
 
 
 func _apply_lane_visuals(lane_instance: Node, lane_data: Dictionary) -> void:
