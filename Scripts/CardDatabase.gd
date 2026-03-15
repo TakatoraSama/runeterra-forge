@@ -425,10 +425,10 @@ const CARDS = {
 		"Cost": 3,
 		"Power": 3,
 		"Keyword": [],
-		"Skill": "{Play}: Discard a 1-2, 3-4, and 5+ cost card to grant me +2 Power for each card discarded.",
+		"Skill": "{Play}: Discard a ≤2, 3-4, and 5+ cost card to grant me +2 Power for each card discarded.",
 		"LevelUp": "You've discarded {discard_threshold}+ times.",
 		"LevelUpTo": "Rumble2",
-		"AbilityType": "",
+		"AbilityType": "discard_by_cost_bracket",
 		"BalanceValues": {"discard_threshold": 4},
 		"PreviewTooltip": ["Rumble1", "Rumble2"]
 	},
@@ -446,7 +446,7 @@ const CARDS = {
 		"Skill": "When I level up, for each of your discarded cards, create a random card with a cost equal to the discarded card's cost and reduce its cost by 1.",
 		"LevelUp": "",
 		"LevelUpTo": "Rumble2",
-		"AbilityType": "",
+		"AbilityType": "level_up_create_from_discards",
 		"BalanceValues": {},
 		"PreviewTooltip": ["Rumble1", "Rumble2"]
 	},
@@ -463,12 +463,12 @@ const CARDS = {
 		"Cost": 6,
 		"Power": 8,
 		"Keyword": [],
-		"Skill": "When I'm discarded, grant another ally in hand +2 Power and return me to your hand.",
+		"Skill": "When I'm discarded, grant another ally in hand +2 Power and create a copy of me in your hand.",
 		"LevelUp": "You've discarded or summoned {power_threshold}+ Power.",
 		"LevelUpTo": "Sion2",
 		"AbilityType": "",
 		"BalanceValues": {"power_threshold": 32},
-		"PreviewTooltip": ["Sion1", "Sion2"]
+		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
 	},
 	"Sion2": {
 		"Name": "Sion",
@@ -481,12 +481,30 @@ const CARDS = {
 		"Cost": 6,
 		"Power": 9,
 		"Keyword": [],
-		"Skill": "I have +{power_increase} Power for each card you've discarded this game. [br]",
+		"Skill": "{Last Breath}: Summon [Sion Returned] here. [br] {Aura}: I have +2 Power for each time your card is discarded.",
 		"LevelUp": "",
 		"LevelUpTo": "",
 		"AbilityType": "",
 		"BalanceValues": {"power_increase": 1},
-		"PreviewTooltip": ["Sion1", "Sion2"]
+		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
+	},
+	"SionReturned": {
+		"Name": "Sion Returned",
+		"Region": ["Noxus"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/SionReturned.webp",
+		"Level": 1,
+		"Cost": 6,
+		"Power": 9,
+		"Keyword": ["Last Breath"],
+		"Skill": "{Aura}: I have +3 Power for each time your card is discarded.",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
 	},
 
 	# Champions - Nautilus line
@@ -525,6 +543,82 @@ const CARDS = {
 		"AbilityType": "",
 		"BalanceValues": {"cost_reduction": 3},
 		"PreviewTooltip": ["Nautilus1", "Nautilus2"]
+	},
+
+	# Champions - Janna line
+	"Janna1": {
+		"Name": "Janna",
+		"Region": ["Piltover Zaun"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Janna1.webp",
+		"Level": 1,
+		"Cost": 1,
+		"Power": 2,
+		"Keyword": [],
+		"Skill": "{Play}: {Updraft} {updraft_threshold} to draw that much at the next {Round Start}.",
+		"LevelUp": "You've drawn {draw_threshold}+ cards.",
+		"LevelUpTo": "Janna2",
+		"AbilityType": "",
+		"BalanceValues": {"updraft_threshold": 2, "draw_threshold": 12},
+		"PreviewTooltip": ["Janna1", "Janna2"]
+	},
+	"Janna2": {
+		"Name": "Janna",
+		"Region": ["Piltover Zaun"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Janna2.webp",
+		"Level": 2,
+		"Cost": 1,
+		"Power": 3,
+		"Keyword": ["Elusive"],
+		"Skill": "{Play}: {Updraft} {updraft_threshold} to draw that much at the next {Round Start}. [br] When I level up, grant me +1 Power for each card you've drawn this game.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"updraft_threshold": 2},
+		"PreviewTooltip": ["Janna1", "Janna2"]
+	},
+
+	# Champion - Karma line
+	"Karma1": {
+		"Name": "Karma",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Karma1.webp",
+		"Level": 1,
+		"Cost": 5,
+		"Power": 5,
+		"Keyword": [],
+		"Skill": "",
+		"LevelUp": "You're {Enlightened}.",
+		"LevelUpTo": "Karma2",
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Karma1", "Karma2"]
+	},
+	"Karma2": {
+		"Name": "Karma",
+		"Region": ["Ionia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Karma2.webp",
+		"Level": 2,
+		"Cost": 5,
+		"Power": 6,
+		"Keyword": [],
+		"Skill": "{Aura}: Allied {play} effect happens twice.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Karma1", "Karma2"]
 	},
 	
 	# Landmarks

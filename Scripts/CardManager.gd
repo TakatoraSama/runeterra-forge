@@ -26,8 +26,10 @@ var killed_cards: Array = []  # Tracks all cards killed during the game [{card_i
 var summoned_cards: Array = []  # Tracks all cards that entered the board [{card_id, owner_player_id, was_played_from_hand}]
 var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
 var recalled_cards: Array = []  # Tracks all recalls triggered by cards [{card_id, owner_player_id, recaller_player_id, recaller_card_id}]
+var discarded_cards: Array = []  # Tracks all cards discarded [{card_id, owner_player_id, discarded_by_card_id, discarded_at_turn}]
 var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
+var _card_resolve_done_signals: Dictionary = {}  # "ownerId_cardId" -> bool, for cross-client resolve sync
 var _is_swap_drag: bool = false           # True when dragging an Elusive board card for a lane swap
 var _swap_drag_origin_slot = null         # The slot the Elusive card came from
 var _swap_drag_origin_zone: Vector2i = Vector2i(-1, -1)  # The zone the Elusive card came from
@@ -261,7 +263,7 @@ func finish_drag():
 			var card_id_str = str(card_being_dragged.card_id)
 			# Send the zone mirrored: my row 1 -> their row 0 (opponent's top)
 			var mirrored_zone = Vector2i(zone_key.x, 1 - zone_key.y)
-			rpc("_receive_opponent_card_play", card_id_str, mirrored_zone.x, mirrored_zone.y)
+			rpc("_receive_opponent_card_play", card_id_str, mirrored_zone.x, mirrored_zone.y, card_being_dragged.power_modifier)
 		card_being_dragged = null
 	else:
 		_return_card_to_hand()
@@ -303,7 +305,14 @@ func resolve_played_cards() -> void:
 		card.is_resolved = true
 		# Trigger ability after reveal/flip animation (await so multi-step abilities
 		# like mass-recall fully complete before the next card flips)
+		var pre_summon_id = card.card_id  # stable key: captured before level-up can mutate card_id
 		await card.on_summon()
+		# Cross-client resolve sync: step both clients through the resolve loop together.
+		if _is_online():
+			if card.owner_player_id == current_player_id:
+				rpc("_receive_card_resolve_done", pre_summon_id)
+			else:
+				await _wait_for_opponent_card_resolve(pre_summon_id)
 		# Check if this resolve triggers any level-ups (e.g. Ice Pillar → Trundle)
 		check_level_ups_after_resolve(card)
 		# Wait for any level-up animation triggered by this resolve to finish
@@ -540,6 +549,54 @@ func track_created_card(card, creator_player_id: int, creator_card_id: String) -
 		card.card_id, creator_card_id, creator_player_id, current_turn, created_cards.size()])
 
 
+func track_discarded_card(card_id: String, owner_player_id: int, discarded_by_card_id: String = "") -> void:
+	"""Record a discarded card for ability tracking (e.g. Rumble level-up condition).
+	discarded_by_card_id: which card triggered the discard (empty = unknown)."""
+	var game_manager = get_node_or_null("/root/Main/GameManager")
+	var current_turn = 0
+	if game_manager and "turn_number" in game_manager:
+		current_turn = game_manager.turn_number
+	discarded_cards.append({
+		"card_id": card_id,
+		"owner_player_id": owner_player_id,
+		"discarded_by_card_id": discarded_by_card_id,
+		"discarded_at_turn": current_turn
+	})
+	print("Card discarded and tracked: %s (by %s, owner %d, turn %d, total: %d)" % [
+		card_id, discarded_by_card_id, owner_player_id, current_turn, discarded_cards.size()])
+
+
+func discard_card_from_hand(card: Node, discarded_by_card_id: String = "") -> void:
+	"""Discard a card from the player's hand with dissolve animation, track it, and free it."""
+	var card_id = card.card_id
+	var owner_id = card.owner_player_id
+	player_hand_reference.remove_card_from_hand(card, false)  # remove from array, no reposition yet
+	card.is_in_hand = false
+	await card.play_discard_dissolve()
+	player_hand_reference.update_hand_position(0.1)  # slide remaining cards after dissolve
+	track_discarded_card(card_id, owner_id, discarded_by_card_id)
+	card.queue_free()
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_discard(card_id: String, discarded_by_card_id: String) -> void:
+	"""Opponent discarded a card — track it on our side."""
+	track_discarded_card(card_id, 1 - current_player_id, discarded_by_card_id)
+
+
+@rpc("any_peer", "reliable")
+func _receive_card_resolve_done(card_id: String) -> void:
+	"""Opponent's card finished all on_summon abilities — safe to proceed in resolve loop."""
+	_card_resolve_done_signals[card_id] = true
+
+
+func _wait_for_opponent_card_resolve(key: String) -> void:
+	"""Block until the card owner's client sends the 'resolve done' signal for this card."""
+	while not _card_resolve_done_signals.get(key, false):
+		await get_tree().create_timer(0.05).timeout
+	_card_resolve_done_signals.erase(key)
+
+
 func adjust_cost(cards, delta: int) -> void:
 	"""Adjust the mana cost of one or more cards by delta (negative = cheaper, positive = more expensive).
 	Accepts a single card Node or an Array of card Nodes.
@@ -733,12 +790,13 @@ func trigger_game_end_abilities() -> void:
 # --- Multiplayer RPCs ---
 
 @rpc("any_peer", "reliable")
-func _receive_opponent_card_play(card_id: String, zone_col: int, zone_row: int) -> void:
+func _receive_opponent_card_play(card_id: String, zone_col: int, zone_row: int, power_mod: int = 0) -> void:
 	"""Receive opponent's card play. Store data to spawn at resolve time (hidden during PLAY)."""
 	_pending_opponent_cards.append({
 		"card_id": card_id,
 		"zone_col": zone_col,
-		"zone_row": zone_row
+		"zone_row": zone_row,
+		"power_mod": power_mod
 	})
 	print("Opponent card play queued: ", card_id, " for zone: ", Vector2i(zone_col, zone_row))
 
@@ -763,6 +821,17 @@ func _receive_opponent_level_up(old_card_id: String, new_card_id: String) -> voi
 			card._perform_level_up(new_card_id)
 			return
 	print("_receive_opponent_level_up: '%s' not found on board" % old_card_id)
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_power_buff(card_id: String, buff: int) -> void:
+	"""Opponent's card gained a power buff from an ability — apply it on our board."""
+	for c in all_cards_in_play_order:
+		if is_instance_valid(c) and c.card_id == card_id and c.owner_player_id != current_player_id:
+			c.power_modifier += buff
+			_notify_zone_power_changed()
+			return
+	print("_receive_opponent_power_buff: '%s' not found on board" % card_id)
 
 
 @rpc("any_peer", "reliable")
@@ -872,6 +941,13 @@ func _spawn_pending_opponent_cards() -> void:
 		var card_data = CardDatabase.CARDS.get(card_id_str)
 		if card_data:
 			CardDatabase.populate_card_visuals(opp_card, card_data)
+
+		var power_mod: int = data.get("power_mod", 0)
+		if power_mod != 0:
+			opp_card.power_modifier = power_mod
+			var power_label = opp_card.get_node_or_null("CardFront/Power")
+			if power_label:
+				power_label.text = opp_card.get_power_display_text()
 
 		opp_card.position = available_slot.position
 		opp_card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)

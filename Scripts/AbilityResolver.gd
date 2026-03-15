@@ -81,8 +81,26 @@ func execute_play_ability(card: Node) -> void:
 			await _ability_recall_allies_same_lane(card)
 		"recall_cost_allies":
 			await _ability_recall_cost_allies(card)
+		"discard_by_cost_bracket":
+			await _ability_discard_by_cost_bracket(card)
 		_:
 			pass  # no Play ability or unhandled type
+
+
+func execute_level_up_ability(card: Node) -> void:
+	"""Fire the {When I level up} ability of the given card.
+	Called from _perform_level_up() after animation and lock release."""
+	if card.card_id == "":
+		return
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+	var ability_type: String = card_data.get("AbilityType", "none")
+	match ability_type:
+		"level_up_create_from_discards":
+			_ability_level_up_create_from_discards(card)
+		_:
+			pass  # no level-up ability or unhandled type
 
 
 func execute_round_start_ability(card: Node) -> bool:
@@ -476,6 +494,125 @@ func _ability_recall_cost_allies(card: Node) -> void:
 	for target in targets:
 		if is_instance_valid(target):
 			await cm.recall_card(target, card.owner_player_id, card.card_id)
+
+
+func _ability_discard_by_cost_bracket(card: Node) -> void:
+	"""Rumble {Play}: discard up to 3 cards from hand — one per cost bracket (≤2, 3–4, 5+).
+	Grants +2 Power for each card discarded. Uses seeded RNG for multiplayer sync."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	# Only the card owner's client performs the discard (opponent gets RPC).
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var hand_cards: Array = []
+	if cm.player_hand_reference:
+		for c in cm.player_hand_reference.player_hand:
+			if is_instance_valid(c):
+				hand_cards.append(c)
+
+	# Group hand cards by cost bracket
+	var bracket_low: Array = []   # cost ≤ 2
+	var bracket_mid: Array = []   # cost 3–4
+	var bracket_high: Array = []  # cost ≥ 5
+	for c in hand_cards:
+		var cost = c.get_current_cost()
+		if cost <= 2:
+			bracket_low.append(c)
+		elif cost <= 4:
+			bracket_mid.append(c)
+		else:
+			bracket_high.append(c)
+
+	var discard_count := 0
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	var card_name: String = card_data.get("Name", card.card_id) if card_data else card.card_id
+
+	for bracket in [bracket_low, bracket_mid, bracket_high]:
+		if bracket.is_empty():
+			continue
+		# Seeded randi() — both clients produce the same index
+		var pick = bracket[randi() % bracket.size()]
+		var pick_id = pick.card_id
+		print("%s {Play}: discarding %s (cost %d)" % [card_name, pick_id, pick.get_current_cost()])
+		await cm.discard_card_from_hand(pick, card.card_id)
+		if _is_online():
+			cm.rpc("_receive_opponent_discard", pick_id, card.card_id)
+		discard_count += 1
+
+	if discard_count > 0:
+		var buff = 2 * discard_count
+		card.power_modifier += buff
+		print("%s {Play}: gained +%d Power (%d cards discarded)" % [card_name, buff, discard_count])
+		if _is_online():
+			cm.rpc("_receive_opponent_power_buff", card.card_id, buff)
+		cm._notify_zone_power_changed()
+
+	# Pause everything: if Rumble met his level-up condition, block until animation completes.
+	if discard_count > 0 and card.card_id == "Rumble1":
+		var rumble_data = CardDatabase.CARDS.get("Rumble1")
+		if rumble_data:
+			var threshold: int = int(rumble_data.get("BalanceValues", {}).get("discard_threshold", 4))
+			var total: int = cm.discarded_cards.filter(
+				func(e): return int(e.get("owner_player_id", -1)) == card.owner_player_id).size()
+			if total >= threshold:
+				var level_up_to = rumble_data.get("LevelUpTo", "")
+				if level_up_to:
+					await card._perform_level_up(str(level_up_to))
+
+
+func _ability_level_up_create_from_discards(card: Node) -> void:
+	"""Rumble2 {When I level up}: for each discarded card owned by this player,
+	create a random collectible card of the same base cost, then reduce its cost by 1."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var owner_id: int = card.owner_player_id
+	var owner_discards: Array = cm.discarded_cards.filter(
+		func(e): return int(e.get("owner_player_id", -1)) == owner_id)
+
+	if owner_discards.is_empty():
+		print("Rumble2 level-up: no discards to create from")
+		return
+
+	var card_name: String = CardDatabase.CARDS.get(card.card_id, {}).get("Name", card.card_id)
+
+	# Cache cost → collectible card pool to avoid re-scanning per discard
+	var pool_cache: Dictionary = {}
+
+	var created_count := 0
+	for entry in owner_discards:
+		var src_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")), {})
+		var base_cost: int = int(src_data.get("Cost", 0))
+
+		if not pool_cache.has(base_cost):
+			var pool: Array = []
+			for cid in CardDatabase.CARDS:
+				var cd = CardDatabase.CARDS[cid]
+				if cd.get("Collectible", false) and int(cd.get("Cost", -1)) == base_cost:
+					pool.append(cid)
+			pool_cache[base_cost] = pool
+
+		var candidates: Array = pool_cache[base_cost]
+		if candidates.is_empty():
+			print("%s level-up: no collectible card at cost %d, skipping" % [card_name, base_cost])
+			continue
+
+		var picked_id: String = candidates[randi() % candidates.size()]
+		cm.create_card_in_hand(picked_id, card.card_id)
+		# create_card_in_hand inserts at index 0 — grab it immediately
+		var new_card = cm.player_hand_reference.player_hand[0]
+		cm.adjust_cost([new_card], -1)
+		created_count += 1
+		print("%s level-up: created %s (cost %d → %d)" % [
+			card_name, picked_id, base_cost, new_card.get_current_cost()])
+
+	print("%s level-up: created %d card(s) from %d discard(s)" % [
+		card_name, created_count, owner_discards.size()])
 
 
 # ─── Round Start abilities ─────────────────────────────────────────────────────

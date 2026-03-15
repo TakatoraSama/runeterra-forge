@@ -43,6 +43,7 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_nasus_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
+	_check_rumble_levelup()
 	_check_sun_disc_transform()
 
 
@@ -55,6 +56,7 @@ func check_level_ups_after_abilities() -> void:
 	_check_nasus_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
+	_check_rumble_levelup()
 	_check_sun_disc_transform()
 
 
@@ -480,6 +482,45 @@ func _check_sun_disc_transform() -> void:
 				print("Buried Sun Disc transforms! %d Ascended champions at lv2" % ascended_lv2_count)
 				card._perform_level_up(str(level_up_to))
 				_on_sun_disc_restored(owner_id)
+
+
+func _check_rumble_levelup() -> void:
+	"""Rumble lv1 → lv2: levels up when the owning player has discarded discard_threshold+ times."""
+	var cm := _get_card_manager()
+	if not cm or cm.discarded_cards.is_empty():
+		return
+
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("Name", "") != "Rumble" or card_data.get("Level", 1) != 1:
+			continue
+		# Only trigger level-up for the local player's Rumble.
+		# The opponent's level-up is handled on their client and received via _receive_opponent_level_up RPC.
+		if card.owner_player_id != cm.current_player_id:
+			continue
+
+		var discard_threshold: int = int(card_data.get("BalanceValues", {}).get("discard_threshold", 4))
+		var owner_id: int = int(card.owner_player_id)
+		var owner_discard_count := 0
+
+		for entry in cm.discarded_cards:
+			if int(entry.get("owner_player_id", -1)) == owner_id:
+				owner_discard_count += 1
+
+		if owner_discard_count < discard_threshold:
+			continue
+
+		var level_up_to = card_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Rumble lv1 met level-up condition! (player %d has %d discards)" % [owner_id, owner_discard_count])
+			card._perform_level_up(str(level_up_to))
+			_notify_zone_power_changed()
 
 
 func _on_sun_disc_restored(owner_id: int) -> void:

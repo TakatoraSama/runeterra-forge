@@ -19,6 +19,26 @@
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_glv2v"]
 size = Vector2(630, 880)
 
+[sub_resource type="VisualShaderNodeTexture2DParameter" id="VisualShaderNodeTexture2DParameter_co2vc"]
+parameter_name = "Texture2DParameter"
+
+[sub_resource type="VisualShaderNodeTexture" id="VisualShaderNodeTexture_tayg5"]
+
+[sub_resource type="VisualShader" id="VisualShader_w84x6"]
+mode = 2
+flags/collision_use_scale = false
+flags/disable_force = false
+flags/disable_velocity = false
+flags/keep_data = false
+nodes/start/2/node = SubResource("VisualShaderNodeTexture2DParameter_co2vc")
+nodes/start/2/position = Vector2(-380, 160)
+nodes/start/3/node = SubResource("VisualShaderNodeTexture_tayg5")
+nodes/start/3/position = Vector2(100, 160)
+nodes/start/connections = PackedInt32Array(2, 0, 3, 2)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_co2vc"]
+shader = SubResource("VisualShader_w84x6")
+
 [sub_resource type="FontVariation" id="FontVariation_6elyo"]
 base_font = ExtResource("2_pbuqb")
 
@@ -446,7 +466,8 @@ visible = false
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Area2D" unique_id=1933624780]
 shape = SubResource("RectangleShape2D_glv2v")
 
-[node name="CardFront" type="Node2D" parent="." unique_id=834932045]
+[node name="CardFront" type="CanvasGroup" parent="." unique_id=834932045]
+material = SubResource("ShaderMaterial_co2vc")
 
 [node name="Cost" type="RichTextLabel" parent="CardFront" unique_id=1582975134]
 z_index = -5

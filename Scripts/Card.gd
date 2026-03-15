@@ -14,6 +14,7 @@ var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, posit
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 var is_in_hand: bool = false   # True while this card is in the local player's hand
 var runtime_keywords: Array = []  # Runtime-applied keywords (e.g. Stun). Not from CardDatabase.
+var _dissolve_mat: ShaderMaterial = null
 
 # Cached scene-tree references (set in _ready). Null for preview-only instances.
 var _board: Node = null
@@ -22,6 +23,8 @@ var _game_manager: Node = null
 
 @onready var card_back: Node2D = $"CardBack"
 @onready var animation_player: AnimationPlayer = $"AnimationPlayer"
+
+const _DISSOLVE_SHADER = preload("res://Materials/card_discard_dissolve.gdshader")
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -36,6 +39,26 @@ func _ready() -> void:
 	_board = get_node_or_null("/root/Main/Board")
 	_card_manager = get_node_or_null("/root/Main/CardManager")
 	_game_manager = get_node_or_null("/root/Main/GameManager")
+	# Apply dissolve shader to each main Sprite2D in CardFront.
+	# Sprite2D nodes always supply TEXTURE correctly — unlike CanvasGroup which
+	# has a broken framebuffer pipeline in Godot 4.6 when the .tscn assigns a
+	# Particles-mode VisualShader. A shared ShaderMaterial means one parameter
+	# update dissolves all sprites at once.
+	var mat := ShaderMaterial.new()
+	mat.shader = _DISSOLVE_SHADER
+	mat.set_shader_parameter("dissolve_amount", 0.0)
+	mat.set_shader_parameter("edge_width", 0.06)
+	mat.set_shader_parameter("edge_color", Color(1.0, 0.5, 0.0, 1.0))
+	mat.set_shader_parameter("gradient_weight", 0.5)
+	mat.set_shader_parameter("noise_seed", 0.0)
+	mat.set_shader_parameter("gray_amount", 0.0)
+	_dissolve_mat = mat
+	for path in ["CardFront/CardBase", "CardFront/CardSpriteParent/CardSprite",
+			"CardFront/CardMana", "CardFront/CardPower",
+			"CardFront/CardSubType", "CardFront/SkillShadow"]:
+		var sprite = get_node_or_null(path)
+		if sprite:
+			sprite.material = mat
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -52,12 +75,18 @@ func update_glow(current_mana: int) -> void:
 		return
 	if get_current_cost() <= current_mana:
 		modulate = Color(1, 1, 1, 1)
+		if _dissolve_mat:
+			_dissolve_mat.set_shader_parameter("gray_amount", 0.0)
 	else:
 		modulate = Color(0.5, 0.5, 0.5, 1)
+		if _dissolve_mat:
+			_dissolve_mat.set_shader_parameter("gray_amount", 1.0)
 
 
 func hide_glow() -> void:
 	modulate = Color(1, 1, 1, 1)
+	if _dissolve_mat:
+		_dissolve_mat.set_shader_parameter("gray_amount", 0.0)
 
 
 func hide_card_back() -> void:
@@ -301,6 +330,9 @@ func _perform_level_up(new_card_id: String) -> void:
 	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
 		old_name, old_name, old_id, new_name, new_card_id])
 
+	# ── 8. Fire "When I level up" ability ────────────────────────────────
+	AbilityResolver.execute_level_up_ability(self)
+
 
 # ── Runtime keyword management ─────────────────────────────────────────────
 
@@ -339,3 +371,16 @@ func _refresh_keyword_display() -> void:
 			keyword_container.add_child(item)
 	else:
 		keyword_container.visible = false
+
+func play_discard_dissolve(duration: float = 0.8) -> void:
+	hide_card_back()
+	if _dissolve_mat:
+		_dissolve_mat.set_shader_parameter("noise_seed", randf() * 100.0)
+		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tween.tween_method(func(val: float): _dissolve_mat.set_shader_parameter("dissolve_amount", val), 0.0, 1.0, duration)
+		tween.parallel().tween_property(self, "modulate:a", 0.0, duration)
+		await tween.finished
+	else:
+		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tween.tween_property(self, "modulate:a", 0.0, duration)
+		await tween.finished
