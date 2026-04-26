@@ -1,0 +1,51 @@
+[gd_scene format=3 uid="uid://ds7i7at4tg5aa"]
+
+[ext_resource type="Script" path="res://Scripts/HomeScreen.gd" id="1_homescr"]
+
+[node name="HomeScreen" type="Node"]
+script = ExtResource("1_homescr")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Background" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.07, 0.1, 1)
+
+[node name="CenterContainer" type="CenterContainer" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/CenterContainer"]
+custom_minimum_size = Vector2(320, 0)
+alignment = 1
+
+[node name="Title" type="Label" parent="UI/CenterContainer/VBox"]
+text = "RUNETERRA FORGE"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 48
+
+[node name="Spacer" type="Control" parent="UI/CenterContainer/VBox"]
+custom_minimum_size = Vector2(0, 32)
+
+[node name="PlayButton" type="Button" parent="UI/CenterContainer/VBox"]
+custom_minimum_size = Vector2(0, 52)
+text = "Play"
+
+[node name="DeckBuilderButton" type="Button" parent="UI/CenterContainer/VBox"]
+custom_minimum_size = Vector2(0, 52)
+text = "Deck Builder"
+
+[node name="CardCatalogButton" type="Button" parent="UI/CenterContainer/VBox"]
+custom_minimum_size = Vector2(0, 52)
+text = "Card Catalog"
+
+[connection signal="pressed" from="UI/CenterContainer/VBox/PlayButton" to="." method="_on_play_pressed"]
+[connection signal="pressed" from="UI/CenterContainer/VBox/DeckBuilderButton" to="." method="_on_deck_builder_pressed"]
+[connection signal="pressed" from="UI/CenterContainer/VBox/CardCatalogButton" to="." method="_on_card_catalog_pressed"]

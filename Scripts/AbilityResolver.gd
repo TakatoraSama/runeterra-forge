@@ -12,6 +12,15 @@ extends Node
 ## execute_* functions.  Card.gd becomes a thin wrapper of pure state.
 ## Deck.gd knows nothing about individual cards.
 
+# Separate RNG for owner-gated (local-only) abilities. These abilities only run
+# on the owner's client, so using the global seeded randi() here would advance
+# it on one side only and desync any subsequent shared pick_random_target() calls
+# (e.g. Kennen stun, Renekton debuff, Nasus kill).
+var _local_rng := RandomNumberGenerator.new()
+
+func _ready() -> void:
+	_local_rng.randomize()
+
 
 # ─── Scene-tree helpers ────────────────────────────────────────────────────────
 
@@ -83,6 +92,12 @@ func execute_play_ability(card: Node) -> void:
 			await _ability_recall_cost_allies(card)
 		"discard_by_cost_bracket":
 			await _ability_discard_by_cost_bracket(card)
+		"create_card_if_not_in_hand":
+			_ability_create_card_if_not_in_hand(card)
+		"spinning_axe_discard":
+			await _ability_spinning_axe(card)
+		"create_multiple_cards":
+			_ability_create_multiple_cards(card)
 		_:
 			pass  # no Play ability or unhandled type
 
@@ -112,7 +127,7 @@ func execute_round_start_ability(card: Node) -> bool:
 	if not card_data:
 		return false
 	var skill: String = card_data.get("Skill", "")
-	if not skill.begins_with("{Round Start}"):
+	if not ("{Round Start}" in skill):
 		return false
 
 	print("Round Start ability triggered for: ", card_data.get("Name", ""))
@@ -120,6 +135,10 @@ func execute_round_start_ability(card: Node) -> bool:
 	match ability_type:
 		"conditional_buff":
 			_ability_conditional_buff(card)
+		"create_card_if_not_in_hand":
+			_ability_create_card_if_not_in_hand(card)
+		"create_multiple_cards":
+			_ability_create_multiple_cards(card)
 		_:
 			pass
 	return true
@@ -184,6 +203,98 @@ func execute_game_start_ability_for_deck(card_id: String, card_data: Dictionary,
 			print("AbilityResolver: unknown Game Start ability type '%s' for card %s" % [ability_type, card_id])
 
 
+# ─── On Discard abilities ──────────────────────────────────────────────────────
+
+func execute_on_discard_ability(card: Node) -> void:
+	"""Fire the on-discard ability of the given card.
+	Called by CardManager.discard_card_from_hand() before the card is freed."""
+	if card.card_id == "":
+		return
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+	var ability_type: String = card_data.get("AbilityType", "none")
+	match ability_type:
+		"on_discard_buff_create":
+			await _ability_on_discard_sion(card)
+		_:
+			pass
+
+
+func _ability_on_discard_sion(card: Node) -> void:
+	"""Sion1 {When discarded}: grant a random ally in hand +power_buff Power,
+	then create a Sion1 copy in hand. Only runs on the owner's client."""
+	var cm := _get_card_manager()
+	if not cm or not cm.player_hand_reference:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var power_buff: int = int(card_data.get("BalanceValues", {}).get("power_buff", 2))
+	var my_name: String = card_data.get("Name", card.card_id)
+
+	var hand_cards: Array = []
+	for c in cm.player_hand_reference.player_hand:
+		if is_instance_valid(c):
+			hand_cards.append(c)
+
+	if not hand_cards.is_empty():
+		var target = hand_cards[_local_rng.randi() % hand_cards.size()]
+		target.power_modifier += power_buff
+		var power_label = target.get_node_or_null("CardFront/Power")
+		if power_label:
+			power_label.text = target.get_power_display_text()
+		var target_data = CardDatabase.CARDS.get(target.card_id)
+		var target_name = target_data.get("Name", target.card_id) if target_data else target.card_id
+		print("%s discarded: granted %s +%d Power" % [my_name, target_name, power_buff])
+
+	cm.create_card_in_hand("Sion1", card.card_id, card.owner_player_id)
+	print("%s discarded: created Sion1 copy in hand" % my_name)
+
+
+# ─── Last Breath abilities ─────────────────────────────────────────────────────
+
+func execute_last_breath_ability(card: Node) -> void:
+	"""Fire the {Last Breath} ability of a card that is about to die.
+	Called by kill flows right before queue_free()."""
+	if card.card_id == "":
+		return
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+	var ability_type: String = card_data.get("AbilityType", "none")
+	match ability_type:
+		"last_breath_create":
+			_ability_last_breath_sion(card)
+		_:
+			pass
+
+
+func _ability_last_breath_sion(card: Node) -> void:
+	"""Sion2 {Last Breath}: create SionReturned in the owner's hand."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	var owner_id: int = card.owner_player_id
+
+	# Only the owner's client creates the card in hand
+	if owner_id != cm.current_player_id:
+		return
+
+	cm.create_card_in_hand("SionReturned", card.card_id, owner_id)
+	print("%s {Last Breath}: created SionReturned in hand" % my_name)
+
+
 # ─── Play abilities ────────────────────────────────────────────────────────────
 
 func _ability_summon_copy(card: Node) -> void:
@@ -197,12 +308,12 @@ func _ability_summon_copy(card: Node) -> void:
 	if not next_slot:
 		return
 
-	var card_scene = load("res://Scenes/Card.tscn")
+	var card_data    = CardDatabase.CARDS[card.card_id]
+	var card_scene = CardDatabase.get_card_scene(card_data)
 	var new_card   = card_scene.instantiate()
 
 	new_card.card_id = card.card_id
 	new_card.owner_player_id = card.owner_player_id  # copy belongs to same player as original
-	var card_data    = CardDatabase.CARDS[card.card_id]
 	CardDatabase.populate_card_visuals(new_card, card_data)
 
 	new_card.position     = next_slot.position
@@ -386,6 +497,122 @@ func _ability_create_card(card: Node) -> void:
 		print("Created [%s] in hand from %s" % [target_name, card_data.get("Name", "")])
 
 
+func _ability_create_card_if_not_in_hand(card: Node) -> void:
+	"""Parse [CardName] from skill text and create it in hand only if not already there.
+	Used by Draven lv1 → Spinning Axe (Play or Round Start)."""
+	if card.owner_player_id != 1:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var skill_text: String = card_data.get("Skill", "")
+	var bracket_start := skill_text.find("[")
+	var bracket_end   := skill_text.find("]")
+	if bracket_start == -1 or bracket_end == -1 or bracket_end <= bracket_start:
+		return
+
+	var target_name := skill_text.substr(bracket_start + 1, bracket_end - bracket_start - 1)
+	var target_id   := CardDatabase.get_card_id_by_name(target_name)
+	if target_id == "":
+		print("AbilityResolver create_card_if_not_in_hand: card not found '%s'" % target_name)
+		return
+
+	var cm := _get_card_manager()
+	if not cm or not cm.player_hand_reference:
+		return
+
+	for c in cm.player_hand_reference.player_hand:
+		if c.card_id == target_id:
+			print("%s: already has [%s] in hand, skipping" % [card_data.get("Name", ""), target_name])
+			return
+
+	cm.create_card_in_hand(target_id, card.card_id, card.owner_player_id)
+
+
+func _ability_spinning_axe(card: Node) -> void:
+	"""Spinning Axe {Play}: discard the newest (leftmost) card in hand,
+	grant Draven +power_bonus Power. Spell card self-removes after resolving."""
+	var cm := _get_card_manager()
+	if not cm or not cm.player_hand_reference:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var power_bonus: int = int(card_data.get("BalanceValues", {}).get("power_bonus", 1))
+	var my_name: String = card_data.get("Name", card.card_id)
+
+	var hand_cards: Array = cm.player_hand_reference.player_hand
+	if hand_cards.is_empty():
+		print("%s {Play}: no cards in hand to discard" % my_name)
+		return
+
+	var target = hand_cards[0]
+	var target_data = CardDatabase.CARDS.get(target.card_id)
+	var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
+
+	var draven_card: Node = null
+	for c in cm.all_cards_in_play_order:
+		if not is_instance_valid(c) or not c.is_resolved:
+			continue
+		if not c.card_slot_is_in:
+			continue
+		if c.owner_player_id != card.owner_player_id:
+			continue
+		var c_data = CardDatabase.CARDS.get(c.card_id)
+		if c_data and c_data.get("Name", "") == "Draven":
+			draven_card = c
+			break
+
+	if draven_card:
+		draven_card.power_modifier += power_bonus
+		var power_label = draven_card.get_node_or_null("CardFront/Power")
+		if power_label:
+			power_label.text = draven_card.get_power_display_text()
+		var draven_data = CardDatabase.CARDS.get(draven_card.card_id)
+		var draven_name: String = draven_data.get("Name", draven_card.card_id) if draven_data else draven_card.card_id
+		print("%s {Play}: discarded %s, granted %s +%d Power (now %d)" % [
+			my_name, target_name, draven_name, power_bonus, draven_card.get_current_power()])
+		cm._notify_zone_power_changed()
+		if cm._is_online():
+			cm.rpc("_receive_opponent_power_buff", draven_card.card_id, power_bonus)
+	else:
+		print("%s {Play}: discarded %s (no Draven on board to buff)" % [my_name, target_name])
+
+	await cm.discard_card_from_hand(target, card.card_id)
+
+
+func _ability_create_multiple_cards(card: Node) -> void:
+	"""Create N copies of a specified card in the owner's hand.
+	Used by Draven lv2 → creates 2 Spinning Axes (no duplicate check)."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var balance: Dictionary = card_data.get("BalanceValues", {})
+	var create_count: int = int(balance.get("create_count", 1))
+	var create_card_id: String = str(balance.get("create_card_id", ""))
+	if create_card_id == "":
+		print("_ability_create_multiple_cards: no create_card_id defined for %s" % card.card_id)
+		return
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	for i in range(create_count):
+		cm.create_card_in_hand(create_card_id, card.card_id, card.owner_player_id)
+		print("%s: created %s in hand (%d/%d)" % [my_name, create_card_id, i + 1, create_count])
+
+
 func _ability_mana_ramp(card: Node) -> void:
 	"""Grant the owner bonus mana next turn. Only runs for the local player."""
 	if card.owner_player_id != 1:
@@ -532,8 +759,8 @@ func _ability_discard_by_cost_bracket(card: Node) -> void:
 	for bracket in [bracket_low, bracket_mid, bracket_high]:
 		if bracket.is_empty():
 			continue
-		# Seeded randi() — both clients produce the same index
-		var pick = bracket[randi() % bracket.size()]
+		# Local-only randi() — only owner runs this; must not touch the global seeded RNG
+		var pick = bracket[_local_rng.randi() % bracket.size()]
 		var pick_id = pick.card_id
 		print("%s {Play}: discarding %s (cost %d)" % [card_name, pick_id, pick.get_current_cost()])
 		await cm.discard_card_from_hand(pick, card.card_id)
@@ -602,7 +829,7 @@ func _ability_level_up_create_from_discards(card: Node) -> void:
 			print("%s level-up: no collectible card at cost %d, skipping" % [card_name, base_cost])
 			continue
 
-		var picked_id: String = candidates[randi() % candidates.size()]
+		var picked_id: String = candidates[_local_rng.randi() % candidates.size()]
 		cm.create_card_in_hand(picked_id, card.card_id)
 		# create_card_in_hand inserts at index 0 — grab it immediately
 		var new_card = cm.player_hand_reference.player_hand[0]
@@ -715,6 +942,10 @@ func _ability_kill_ally_buff(card: Node) -> void:
 		board.remove_card_from_zone(zone_key, weakest_card)
 		board.reposition_cards_in_zone(zone_key)
 		weakest_card.card_slot_is_in = null  # Mark as removed from board (historical tracker guard)
+		# Fire Last Breath abilities before the card is freed
+		var killed_data = CardDatabase.CARDS.get(weakest_card.card_id)
+		if killed_data and killed_data.get("AbilityType", "") == "last_breath_create":
+			await execute_last_breath_ability(weakest_card)
 		weakest_card.queue_free()
 
 	# 'and' — buff ALWAYS applies regardless of whether the kill succeeded
@@ -961,9 +1192,126 @@ func _ability_nasus_game_end_kill(card: Node) -> void:
 	board.remove_card_from_zone(enemy_zone, target)
 	board.reposition_cards_in_zone(enemy_zone)
 	target.card_slot_is_in = null  # Mark as removed from board (historical tracker guard)
+	# Fire Last Breath abilities before the card is freed
+	var killed_data = CardDatabase.CARDS.get(target.card_id)
+	if killed_data and killed_data.get("AbilityType", "") == "last_breath_create":
+		await execute_last_breath_ability(target)
 	target.queue_free()
 
 	print("%s Game End: killed %s (Power %d)" % [my_name, target_name, target_power])
+
+
+# ─── Game End (from hand) abilities ────────────────────────────────────────────
+
+func execute_game_end_hand_ability(card_id: String, card_data: Dictionary, owner_player_id: int) -> void:
+	"""Fire a {Game End} ability for a card that is in hand (not on board).
+	Called by CardManager.trigger_game_end_abilities() for hand cards."""
+	var ability_type: String = card_data.get("AbilityType", "none")
+	var hand_ability_type: String = card_data.get("HandAbilityType", "")
+	var effective_type = hand_ability_type if hand_ability_type != "" else ability_type
+	match effective_type:
+		"game_end_summon_from_hand":
+			await _ability_game_end_sion_summon(card_id, card_data, owner_player_id)
+		_:
+			pass
+
+
+func _ability_game_end_sion_summon(card_id: String, card_data: Dictionary, owner_player_id: int) -> void:
+	"""Sion2/SionReturned {Game End}: if in hand, summon to the highest-power lane
+	where the owner is losing. Removes the card from hand."""
+	var cm := _get_card_manager()
+	if not cm or not cm.player_hand_reference:
+		return
+	if owner_player_id != cm.current_player_id:
+		return
+
+	var board := _get_board()
+	if not board:
+		return
+
+	var my_name: String = card_data.get("Name", card_id)
+
+	# Find the actual card node in hand
+	var sion_in_hand = null
+	for c in cm.player_hand_reference.player_hand:
+		if is_instance_valid(c) and c.card_id == card_id and c.owner_player_id == owner_player_id:
+			sion_in_hand = c
+			break
+
+	if not sion_in_hand:
+		print("%s {Game End}: not found in hand" % my_name)
+		return
+
+	# Find the lane column with highest total power where owner is losing
+	var best_col: int = -1
+	var best_power: int = -1
+	for col in range(3):
+		var ally_zone := Vector2i(col, board.get_ally_row(owner_player_id))
+		var enemy_zone := Vector2i(col, 1 - board.get_ally_row(owner_player_id))
+		var ally_power := _calc_zone_power(board, ally_zone)
+		var enemy_power := _calc_zone_power(board, enemy_zone)
+		if ally_power < enemy_power and ally_power > best_power:
+			best_col = col
+			best_power = ally_power
+
+	if best_col == -1:
+		# Not losing in any lane — summon to the lane with lowest ally power (best chance)
+		var lowest_power: int = INF
+		for col in range(3):
+			var ally_zone := Vector2i(col, board.get_ally_row(owner_player_id))
+			var ally_power := _calc_zone_power(board, ally_zone)
+			if ally_power < lowest_power:
+				best_col = col
+				lowest_power = ally_power
+
+	if best_col == -1:
+		best_col = 0  # fallback
+
+	# Summon Sion to the best lane
+	var ally_row: int = board.get_ally_row(owner_player_id)
+	var zone_key := Vector2i(best_col, ally_row)
+	var zone_slots: Array = board.slots_by_zone.get(zone_key, [])
+
+	var available_slot = null
+	for slot in zone_slots:
+		if not slot.card_in_slot:
+			available_slot = slot
+			break
+
+	if not available_slot:
+		print("%s {Game End}: no available slot in lane %d" % [my_name, best_col])
+		return
+
+	# Remove from hand
+	cm.player_hand_reference.remove_card_from_hand(sion_in_hand, false)
+	cm.player_hand_reference.update_hand_position(0.1)
+
+	# Create the board card
+	var card_scene = CardDatabase.get_card_scene(card_data)
+	var new_card = card_scene.instantiate()
+	new_card.card_id = card_id
+	new_card.owner_player_id = owner_player_id
+	CardDatabase.populate_card_visuals(new_card, card_data)
+
+	new_card.position = available_slot.position
+	new_card.scale = Vector2(0.15, 0.15)
+	new_card.z_index = 0
+	new_card.card_slot_is_in = available_slot
+	new_card.get_node("Area2D/CollisionShape2D").disabled = true
+	new_card.is_resolved = true
+	if new_card.has_method("hide_card_back"):
+		new_card.hide_card_back()
+
+	cm.add_child(new_card)
+	available_slot.card_in_slot = true
+	board.add_card_to_zone(zone_key, new_card)
+	cm.add_card_to_play_order(new_card)
+	cm.track_summoned_card(new_card, false)
+
+	# Free the hand card
+	sion_in_hand.queue_free()
+
+	print("%s {Game End}: summoned to lane %d (power %d)" % [my_name, best_col, best_power])
 
 
 # ─── Game Start abilities ──────────────────────────────────────────────────────
@@ -993,7 +1341,7 @@ func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 		print("AbilityResolver: no available slot in mid lane for Sun Disc")
 		return
 
-	var card_scene = preload("res://Scenes/Card.tscn")
+	var card_scene = CardDatabase.get_card_scene(CardDatabase.CARDS["BuriedSunDisc"])
 	var sun_disc   = card_scene.instantiate()
 
 	sun_disc.card_id          = "BuriedSunDisc"
@@ -1044,13 +1392,13 @@ func _receive_opponent_game_start_summon(card_id_str: String, zone_col: int, zon
 		print("AbilityResolver: no slot for opponent game-start summon in zone: ", zone_key)
 		return
 
-	var card_scene = preload("res://Scenes/Card.tscn")
+	var card_data = CardDatabase.CARDS.get(card_id_str)
+	var card_scene = CardDatabase.get_card_scene(card_data)
 	var opp_card   = card_scene.instantiate()
 
 	opp_card.card_id         = card_id_str
 	opp_card.owner_player_id = 0  # opponent is always player 0 from our view
 
-	var card_data = CardDatabase.CARDS.get(card_id_str)
 	if card_data:
 		CardDatabase.populate_card_visuals(opp_card, card_data)
 
@@ -1160,7 +1508,7 @@ func _ability_swap_arrive_summon_blade(card: Node, from_zone: Vector2i) -> void:
 		return
 
 	# Summon Blade (standard 8-step pattern)
-	var card_scene = preload("res://Scenes/Card.tscn")
+	var card_scene = CardDatabase.get_card_scene(CardDatabase.CARDS["Blade"])
 	var blade = card_scene.instantiate()
 	blade.card_id = "Blade"
 	blade.owner_player_id = owner_id
@@ -1213,7 +1561,7 @@ func _receive_opponent_irelia_blade_summon(zone_col: int, zone_row: int,
 		print("Irelia blade RPC: no slot in zone %s" % str(zone_key))
 		return
 
-	var card_scene = preload("res://Scenes/Card.tscn")
+	var card_scene = CardDatabase.get_card_scene(CardDatabase.CARDS["Blade"])
 	var blade = card_scene.instantiate()
 	blade.card_id = "Blade"
 	blade.owner_player_id = owner_player_id
@@ -1244,6 +1592,6 @@ func _calc_zone_power(board: Node, zone_key: Vector2i) -> int:
 	Unresolved (face-down) cards are excluded so they don't affect lane comparisons."""
 	var total := 0
 	for card in board.get_cards_in_zone(zone_key):
-		if is_instance_valid(card) and card.is_resolved:
+		if is_instance_valid(card) and card.is_resolved and card.has_method("get_current_power"):
 			total += card.get_current_power()
 	return total

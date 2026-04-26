@@ -40,6 +40,10 @@ func _ready() -> void:
 func show_card_preview(source_card: Node) -> void:
 	_source_card = source_card
 	var card_id := str(source_card.card_id)
+	show_preview_by_id(card_id)
+
+
+func show_preview_by_id(card_id: String) -> void:
 	var card_data: Dictionary = CardDatabase.CARDS.get(card_id, {})
 
 	# Build the tooltip list from PreviewTooltip (int array → string array)
@@ -69,7 +73,8 @@ func _show_at_index(index: int) -> void:
 	_clear_preview()
 
 	var card_id = _tooltip_ids[index]
-	var card_scene: PackedScene = load("res://Scenes/Card.tscn")
+	var card_data: Dictionary = CardDatabase.CARDS.get(card_id, {})
+	var card_scene: PackedScene = CardDatabase.get_card_scene(card_data)
 	var preview := card_scene.instantiate()
 
 	# Scale so internal 0.2-scale sprites hit exactly 1.0 → no blur

@@ -1,0 +1,74 @@
+[gd_scene format=3 uid="uid://bqlh681b6ti5b"]
+
+[ext_resource type="Script" uid="uid://vl7xo5oipt2f" path="res://Scripts/CardCatalog.gd" id="1_catalog"]
+[ext_resource type="PackedScene" uid="uid://bmtjnfemn6vs4" path="res://Scenes/CardPreview.tscn" id="2_preview"]
+
+[node name="CardCatalog" type="Node" unique_id=1241275947]
+script = ExtResource("1_catalog")
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=1133390919]
+
+[node name="Background" type="ColorRect" parent="UI" unique_id=1786560719]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.07, 0.1, 1)
+
+[node name="VBox" type="VBoxContainer" parent="UI" unique_id=1524679095]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 8.0
+offset_right = -16.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="FilterBar" type="HBoxContainer" parent="UI/VBox" unique_id=1387871689]
+custom_minimum_size = Vector2(0, 56)
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="UI/VBox/FilterBar" unique_id=154303637]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "← Back"
+
+[node name="VSep0" type="VSeparator" parent="UI/VBox/FilterBar" unique_id=664810170]
+layout_mode = 2
+
+[node name="RegionBar" type="HBoxContainer" parent="UI/VBox/FilterBar" unique_id=1510540695]
+layout_mode = 2
+
+[node name="VSep1" type="VSeparator" parent="UI/VBox/FilterBar" unique_id=39103592]
+layout_mode = 2
+
+[node name="CostBar" type="HBoxContainer" parent="UI/VBox/FilterBar" unique_id=941222738]
+layout_mode = 2
+
+[node name="VSep2" type="VSeparator" parent="UI/VBox/FilterBar" unique_id=194668017]
+layout_mode = 2
+
+[node name="SearchField" type="LineEdit" parent="UI/VBox/FilterBar" unique_id=1202445082]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search cards..."
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UI/VBox" unique_id=1606422071]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Grid" type="GridContainer" parent="UI/VBox/ScrollContainer" unique_id=812267576]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+columns = 7
+
+[node name="CardPreview" parent="." unique_id=57190746 instance=ExtResource("2_preview")]
+
+[connection signal="pressed" from="UI/VBox/FilterBar/BackButton" to="." method="_on_back_pressed"]
+[connection signal="text_changed" from="UI/VBox/FilterBar/SearchField" to="." method="_on_search_changed"]

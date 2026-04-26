@@ -14,6 +14,7 @@ var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, posit
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 var is_in_hand: bool = false   # True while this card is in the local player's hand
 var runtime_keywords: Array = []  # Runtime-applied keywords (e.g. Stun). Not from CardDatabase.
+var axe_play_count: int = 0  # Tracks Spinning Axes played while this Draven is on board.
 var _dissolve_mat: ShaderMaterial = null
 
 # Cached scene-tree references (set in _ready). Null for preview-only instances.
@@ -361,16 +362,21 @@ func _refresh_keyword_display() -> void:
 		child.queue_free()
 	var card_data = CardDatabase.CARDS.get(card_id, {})
 	var all_keywords: Array = card_data.get("Keyword", []) + runtime_keywords
-	if all_keywords.size() > 0:
-		keyword_container.visible = true
-		var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
-		for keyword in all_keywords:
-			var item = keyword_item_scene.instantiate()
-			item.get_node("KeywordSprite").texture = ResourceLoader.load(
-				"res://Assets/KeywordSprites/" + str(keyword) + ".webp")
-			keyword_container.add_child(item)
-	else:
+	if all_keywords.size() == 0:
 		keyword_container.visible = false
+		return
+	keyword_container.visible = true
+	var show_name := all_keywords.size() < 3
+	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
+	for keyword in all_keywords:
+		var item = keyword_item_scene.instantiate()
+		item.get_node("HBoxContainer/SpriteMargin/KeywordSprite").texture = ResourceLoader.load(
+			"res://Assets/KeywordSprites/" + str(keyword) + ".webp")
+		if show_name:
+			item.get_node("HBoxContainer/KeywordName").text = keyword
+		else:
+			item.get_node("HBoxContainer/KeywordName").visible = false
+		keyword_container.add_child(item)
 
 func play_discard_dissolve(duration: float = 0.8) -> void:
 	hide_card_back()

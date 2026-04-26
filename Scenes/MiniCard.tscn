@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://minicard001"]
+
+[ext_resource type="Script" path="res://Scripts/MiniCard.gd" id="1_minicard"]
+
+[node name="MiniCard" type="Control"]
+custom_minimum_size = Vector2(126, 176)
+mouse_filter = 0
+script = ExtResource("1_minicard")
+
+[node name="Highlight" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.5)
+visible = false
+mouse_filter = 2

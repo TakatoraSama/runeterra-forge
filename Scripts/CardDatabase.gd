@@ -1,5 +1,9 @@
 class_name CardDatabase
 
+const CARD_SCENE = preload("res://Scenes/Card.tscn")
+const CARD_SPELL_SCENE = preload("res://Scenes/CardSpell.tscn")
+const CARD_LANDMARK_SCENE = preload("res://Scenes/CardLandmark.tscn")
+
 const CARDS = {
 	# Champions - Azir Line
 	"Azir1": {
@@ -342,14 +346,14 @@ const CARDS = {
 		"Name": "Kennen",
 		"Region": ["Bandle City", "Ionia"],
 		"Type": "Champion",
-		"SubType": "",
+		"SubType": "Yordle",
 		"Collectible": true,
 		"Sprite": "res://Assets/CardSprites/Kennen1.webp",
 		"Level": 1,
 		"Cost": 1,
 		"Power": 1,
 		"Keyword": [],
-		"Skill": "{Play}: :Stun: {Stun} an enemy here.",
+		"Skill": "{Play}: :Stun:{Stun} an enemy here.",
 		"LevelUp": "You've sumomoned the same ally {summon_threshold}+ times.",
 		"LevelUpTo": "Kennen2",
 		"AbilityType": "stun_enemy",
@@ -360,14 +364,14 @@ const CARDS = {
 		"Name": "Kennen",
 		"Region": ["Bandle City", "Ionia"],
 		"Type": "Champion",
-		"SubType": "",
+		"SubType": "Yordle",
 		"Collectible": false,
 		"Sprite": "res://Assets/CardSprites/Kennen2.webp",
 		"Level": 2,
 		"Cost": 1,
 		"Power": 2,
 		"Keyword": [],
-		"Skill": "{Play}: :Stun: {Stun} an enemy here and grant it -{power_decrease} Power.",
+		"Skill": "{Play}: :Stun:{Stun} an enemy here and grant it -{power_decrease} Power.",
 		"LevelUp": "",
 		"LevelUpTo": "",
 		"AbilityType": "stun_enemy",
@@ -418,14 +422,14 @@ const CARDS = {
 		"Name": "Rumble",
 		"Region": ["Bandle City", "Noxus"],
 		"Type": "Champion",
-		"SubType": "",
+		"SubType": "Yordle",
 		"Collectible": true,
 		"Sprite": "res://Assets/CardSprites/Rumble1.webp",
 		"Level": 1,
-		"Cost": 3,
+		"Cost": 4,
 		"Power": 3,
 		"Keyword": [],
-		"Skill": "{Play}: Discard a ≤2, 3-4, and 5+ cost card to grant me +2 Power for each card discarded.",
+		"Skill": "{Play}: Discard a 2 or less, 3-4, and 5+ cost card to grant me +2 Power for each card discarded.",
 		"LevelUp": "You've discarded {discard_threshold}+ times.",
 		"LevelUpTo": "Rumble2",
 		"AbilityType": "discard_by_cost_bracket",
@@ -436,14 +440,14 @@ const CARDS = {
 		"Name": "Rumble",
 		"Region": ["Bandle City", "Noxus"],
 		"Type": "Champion",
-		"SubType": "",
+		"SubType": "Yordle",
 		"Collectible": false,
 		"Sprite": "res://Assets/CardSprites/Rumble2.webp",
 		"Level": 2,
-		"Cost": 3,
+		"Cost": 4,
 		"Power": 4,
 		"Keyword": [],
-		"Skill": "When I level up, for each of your discarded cards, create a random card with a cost equal to the discarded card's cost and reduce its cost by 1.",
+		"Skill": "When I level up, for each of your discarded cards, create a random card with a cost equal to the discarded card's cost, reduce its cost by 1 and grant it :Augment:{Augment}.",
 		"LevelUp": "",
 		"LevelUpTo": "Rumble2",
 		"AbilityType": "level_up_create_from_discards",
@@ -463,11 +467,11 @@ const CARDS = {
 		"Cost": 6,
 		"Power": 8,
 		"Keyword": [],
-		"Skill": "When I'm discarded, grant another ally in hand +2 Power and create a copy of me in your hand.",
+		"Skill": "When I'm discarded, grant another ally in hand +{power_buff} Power and create a copy of me in your hand.",
 		"LevelUp": "You've discarded or summoned {power_threshold}+ Power.",
 		"LevelUpTo": "Sion2",
-		"AbilityType": "",
-		"BalanceValues": {"power_threshold": 32},
+		"AbilityType": "on_discard_buff_create",
+		"BalanceValues": {"power_buff": 2, "power_threshold": 32},
 		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
 	},
 	"Sion2": {
@@ -479,13 +483,14 @@ const CARDS = {
 		"Sprite": "res://Assets/CardSprites/Sion2.webp",
 		"Level": 2,
 		"Cost": 6,
-		"Power": 9,
+		"Power": 10,
 		"Keyword": [],
-		"Skill": "{Last Breath}: Summon [Sion Returned] here. [br] {Aura}: I have +2 Power for each time your card is discarded.",
+		"Skill": "{Last Breath}: Create [Sion Returned] in your hand. [br] {Game End}: If I'm in your hand, summon me to the highest power lane where you're losing.",
 		"LevelUp": "",
 		"LevelUpTo": "",
-		"AbilityType": "",
-		"BalanceValues": {"power_increase": 1},
+		"AbilityType": "last_breath_create",
+		"HandAbilityType": "game_end_summon_from_hand",
+		"BalanceValues": {},
 		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
 	},
 	"SionReturned": {
@@ -497,12 +502,12 @@ const CARDS = {
 		"Sprite": "res://Assets/CardSprites/SionReturned.webp",
 		"Level": 1,
 		"Cost": 6,
-		"Power": 9,
-		"Keyword": ["Last Breath"],
-		"Skill": "{Aura}: I have +3 Power for each time your card is discarded.",
+		"Power": 10,
+		"Keyword": [],
+		"Skill": "{Game End}: If I'm in your hand, summon me to the highest power lane where you're losing.",
 		"LevelUp": "",
 		"LevelUpTo": "",
-		"AbilityType": "",
+		"AbilityType": "game_end_summon_from_hand",
 		"BalanceValues": {},
 		"PreviewTooltip": ["Sion1", "Sion2", "SionReturned"]
 	},
@@ -575,50 +580,551 @@ const CARDS = {
 		"Cost": 1,
 		"Power": 3,
 		"Keyword": ["Elusive"],
-		"Skill": "{Play}: {Updraft} {updraft_threshold} to draw that much at the next {Round Start}. [br] When I level up, grant me +1 Power for each card you've drawn this game.",
+		"Skill": "{Play} or {Round Start}: Draw {draw_threshold}. [br] When you draw a card, reduce its cost by {cost_reduction}.",
 		"LevelUp": "",
 		"LevelUpTo": null,
 		"AbilityType": "",
-		"BalanceValues": {"updraft_threshold": 2},
+		"BalanceValues": {"updraft_threshold": 2, "draw_threshold": 1, "cost_reduction": 1},
 		"PreviewTooltip": ["Janna1", "Janna2"]
 	},
 
-	# Champion - Karma line
-	"Karma1": {
-		"Name": "Karma",
+	# Champion - Mordekaiser line
+	"Mordekaiser1": {
+		"Name": "Mordekaiser",
+		"Region": ["Noxus", "Shadow Isles"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Mordekaiser1.webp",
+		"Level": 1,
+		"Cost": 5,
+		"Power": 8,
+		"Keyword": ["Challenger"],
+		"Skill": "{Play}: Kill 2 allies here. [br] When another ally dies, revive it.",
+		"LevelUp": "{killed_threshold}+ allies have died. Allies with 5+ Power count twice.",
+		"LevelUpTo": "Mordekaiser2",
+		"AbilityType": "",
+		"BalanceValues": {"killed_threshold": 8},
+		"PreviewTooltip": ["Mordekaiser1", "Mordekaiser2"]
+	},
+	"Mordekaiser2": {
+		"Name": "Mordekaiser",
+		"Region": ["Noxus", "Shadow Isles"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Mordekaiser2.webp",
+		"Level": 2,
+		"Cost": 5,
+		"Power": 9,
+		"Keyword": ["Challenger"],
+		"Skill": "When another ally dies, revive it. [br] {Round End}: Kill other units here, remaining only me and the weakest enemy.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"revive_buff": 2},
+		"PreviewTooltip": ["Mordekaiser1", "Mordekaiser2"]
+	},
+
+	# Champion - Viktor line
+	"Viktor1": {
+		"Name": "Viktor",
+		"Region": ["Piltover Zaun"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Viktor1.webp",
+		"Level": 1,
+		"Cost": 2,
+		"Power": 3,
+		"Keyword": ["Augment"],
+		"Skill": "{Play} or {Round Start}: Create a [Hex Core Upgrade] in your hand if you don't have one.",
+		"LevelUp": "You've played {card_threshold}+ created cards.",
+		"LevelUpTo": "Viktor2",
+		"AbilityType": "",
+		"BalanceValues": {"card_threshold": 4},
+		"PreviewTooltip": ["Viktor1", "Viktor2", "HexCoreUpgrade"]
+	},
+	"Viktor2": {
+		"Name": "Viktor",
+		"Region": ["Piltover Zaun"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Viktor2.webp",
+		"Level": 2,
+		"Cost": 2,
+		"Power": 4,
+		"Keyword": ["Augment"],
+		"Skill": "{Play} or {Round Start}: Create a [Hex Core Upgrade] in your hand if you don't have one. [br] {Aura}: Created cards cost {cost_decrease} less.",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "",
+		"BalanceValues": {"cost_decrease": 1},
+		"PreviewTooltip": ["Viktor1", "Viktor2", "HexCoreUpgrade"]
+	},
+	"HexCoreUpgrade": {
+		"Name": "Hex Core Upgrade",
+		"Region": ["Piltover Zaun"],
+		"Type": "Spell",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/HexCoreUpgrade.webp",
+		"Cost": 0,
+		"Keyword": ["Slow"],
+		"Skill": "Grant [Viktor] a random keyword.",
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Viktor1", "Viktor2", "HexCoreUpgrade"]
+	},
+
+	# Champion - Draven line
+	"Draven1": {
+		"Name": "Draven",
+		"Region": ["Noxus"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Draven1.webp",
+		"Level": 1,
+		"Cost": 3,
+		"Power": 3,
+		"Keyword": [],
+		"Skill": "{Play} or {Round Start}: Create a [Spinning Axe] in your hand if you don't have one.",
+		"LevelUp": "I've seen you play {axe_threshold}+ [Spinning Axes].",
+		"LevelUpTo": "Draven2",
+		"AbilityType": "create_card_if_not_in_hand",
+		"BalanceValues": {"axe_threshold": 2},
+		"PreviewTooltip": ["Draven1", "Draven2", "SpinningAxe"]
+	},
+	"Draven2": {
+		"Name": "Draven",
+		"Region": ["Noxus"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Draven2.webp",
+		"Level": 2,
+		"Cost": 3,
+		"Power": 4,
+		"Keyword": [],
+		"Skill": "{Play} or {Round Start}: Create 2 [Spinning Axes] in your hand.",
+		"LevelUp": "",
+		"LevelUpTo": "",
+		"AbilityType": "create_multiple_cards",
+		"BalanceValues": {"create_count": 2, "create_card_id": "SpinningAxe"},
+		"PreviewTooltip": ["Draven1", "Draven2", "SpinningAxe"]
+	},
+	"SpinningAxe": {
+		"Name": "Spinning Axe",
+		"Region": ["Noxus"],
+		"Type": "Spell",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/SpinningAxe.webp",
+		"Cost": 0,
+		"Keyword": ["Fast"],
+		"Skill": "Discard your leftmost card to grant [Draven] +{power_bonus} Power.",
+		"AbilityType": "spinning_axe_discard",
+		"BalanceValues": {"power_bonus": 1},
+		"PreviewTooltip": ["Draven1", "Draven2", "SpinningAxe"]
+	},
+
+	# Champions - Lucian line
+	"Lucian1": {
+		"Name": "Lucian",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Lucian1.webp",
+		"Level": 1,
+		"Cost": 1,
+		"Power": 2,
+		"Keyword": [],
+		"Skill": "",
+		"LevelUp": "I've seen {die_threshold}+ allies or an allied [Senna] die.",
+		"LevelUpTo": "Lucian2",
+		"AbilityType": "",
+		"BalanceValues": {"die_threshold": 3},
+		"PreviewTooltip": ["Lucian1", "Lucian2"]
+	},
+	"Lucian2": {
+		"Name": "Lucian",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Lucian2.webp",
+		"Level": 2,
+		"Cost": 1,
+		"Power": 3,
+		"Keyword": [],
+		"Skill": "The first time each round I see another ally die, {Rally} another ally here.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Lucian1", "Lucian2"]
+	},
+
+	# Champions - Garen line
+	"Garen1": {
+		"Name": "Garen",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "Elite",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Garen1.webp",
+		"Level": 1,
+		"Cost": 5,
+		"Power": 5,
+		"Keyword": ["Regeneration"],
+		"Skill": "{Play}: Grant front-row allies +{play_buff} Power.",
+		"LevelUp": "You've activated {Play} effects {levelup_threshold}+ times.",
+		"LevelUpTo": "Garen2",
+		"AbilityType": "",
+		"BalanceValues": {"play_buff": 1, "levelup_threshold": 5},
+		"PreviewTooltip": ["Garen1", "Garen2"]
+	},
+	"Garen2": {
+		"Name": "Garen",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "Elite",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Garen2.webp",
+		"Level": 2,
+		"Cost": 5,
+		"Power": 6,
+		"Keyword": ["Regeneration"],
+		"Skill": "{Play}: Grant allies +{play_buff} Power. [br] {Round Start}: {Rally} ALL allies.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"play_buff": 1},
+		"PreviewTooltip": ["Garen1", "Garen2"]
+	},
+
+	# Champions - Quinn line
+	"Quinn1": {
+		"Name": "Quinn",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Quinn1.webp",
+		"Level": 1,
+		"Cost": 4,
+		"Power": 5,
+		"Keyword": ["Scout"],
+		"Skill": "{Play}: {Spawn} [Valor] 1 at another location and grant it :Challenger:{Challenger}.",
+		"LevelUp": "You've activated {Play} effects {levelup_threshold}+ times.",
+		"LevelUpTo": "Quinn2",
+		"AbilityType": "",
+		"BalanceValues": {"levelup_threshold": 4},
+		"PreviewTooltip": ["Quinn1", "Quinn2", "Valor"]
+	},
+	"Quinn2": {
+		"Name": "Quinn",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Quinn2.webp",
+		"Level": 2,
+		"Cost": 4,
+		"Power": 6,
+		"Keyword": ["Scout"],
+		"Skill": "{Play} or {Round Start}: {Spawn} [Valor] 1 at another location and grant it :Challenger:{Challenger}.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Quinn1", "Quinn2", "Valor"]
+	},
+	"Valor": {
+		"Name": "Valor",
+		"Region": ["Demacia"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Valor.webp",
+		"Cost": 1,
+		"Power": 1,
+		"Keyword": [],
+		"Skill": "",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Quinn1", "Quinn2", "Valor"]
+	},
+
+	# Champion - Hecarim line
+	"Hecarim1": {
+		"Name": "Hecarim",
+		"Region": ["Shadow Isles"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Hecarim1.webp",
+		"Level": 1,
+		"Cost": 6,
+		"Power": 6,
+		"Keyword": ["Overwhelm"],
+		"Skill": "{Play}: Summon a [Spectral Rider] to each other location.",
+		"LevelUp": "You've summoned {summon_threshold}+ :Ephemeral:{Ephemeral} units.",
+		"LevelUpTo": "Hecarim2",
+		"AbilityType": "",
+		"BalanceValues": {"summon_threshold": 6},
+		"PreviewTooltip": ["Hecarim1", "Hecarim2", "SpectralRider"]
+	},
+	"Hecarim2": {
+		"Name": "Hecarim",
+		"Region": ["Shadow Isles"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Hecarim2.webp",
+		"Level": 2,
+		"Cost": 6,
+		"Power": 7,
+		"Keyword": ["Overwhelm"],
+		"Skill": "{Play}: Summon a [Spectral Rider] to each other location. [br] When I level up, grant :Ephemeral:{Ephemeral} units {everywhere} +{buff_power} Power.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"buff_power": 3},
+		"PreviewTooltip": ["Hecarim1", "Hecarim2", "SpectralRider"]
+	},
+	"SpectralRider": {
+		"Name": "Spectral Rider",
+		"Region": ["Shadow Isles"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/SpectralRider.webp",
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": ["Ephemeral"],
+		"Skill": "{Round Start}: Grant the strongest allied [Hecarim] my Power.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Hecarim1", "Hecarim2", "SpectralRider"]
+	},
+
+	# Champion - Zed line
+	"Zed1": {
+		"Name": "Zed",
 		"Region": ["Ionia"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": true,
-		"Sprite": "res://Assets/CardSprites/Karma1.webp",
+		"Sprite": "res://Assets/CardSprites/Zed1.webp",
 		"Level": 1,
-		"Cost": 5,
-		"Power": 5,
-		"Keyword": [],
-		"Skill": "",
-		"LevelUp": "You're {Enlightened}.",
-		"LevelUpTo": "Karma2",
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": ["Elusive"],
+		"Skill": "When I {swap} lane, summon a [Living Shadow] at the original lane and I {strike} an enemy there.",
+		"LevelUp": "I've seen myself or [Living Shadow] strike {strike_threshold}+ times.",
+		"LevelUpTo": "Zed2",
 		"AbilityType": "",
-		"BalanceValues": {},
-		"PreviewTooltip": ["Karma1", "Karma2"]
+		"BalanceValues": {"strike_threshold": 3},
+		"PreviewTooltip": ["Zed1", "Zed2", "LivingShadow"]
 	},
-	"Karma2": {
-		"Name": "Karma",
+	"Zed2": {
+		"Name": "Zed",
 		"Region": ["Ionia"],
 		"Type": "Champion",
 		"SubType": "",
 		"Collectible": false,
-		"Sprite": "res://Assets/CardSprites/Karma2.webp",
+		"Sprite": "res://Assets/CardSprites/Zed2.webp",
 		"Level": 2,
-		"Cost": 5,
-		"Power": 6,
-		"Keyword": [],
-		"Skill": "{Aura}: Allied {play} effect happens twice.",
+		"Cost": 2,
+		"Power": 3,
+		"Keyword": ["Elusive"],
+		"Skill": "When I {swap} lane, summon a [Living Shadow] with my Power at the original lane and I {strike} an enemy there.",
 		"LevelUp": "",
 		"LevelUpTo": null,
 		"AbilityType": "",
 		"BalanceValues": {},
-		"PreviewTooltip": ["Karma1", "Karma2"]
+		"PreviewTooltip": ["Zed1", "Zed2", "LivingShadow"]
+	},
+	"LivingShadow": {
+		"Name": "Living Shadow",
+		"Region": ["Ionia"],
+		"Type": "Follower",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/LivingShadow.webp",
+		"Cost": 2,
+		"Power": 2,
+		"Keyword": ["Ephemeral"],
+		"Skill": "{Round End}: I strike the weakest enemy here if you're winning here.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Zed1", "Zed2", "LivingShadow"]
+	},
+
+	# Champions - Ryze line
+	"Ryze1": {
+		"Name": "Ryze",
+		"Region": ["Runeterra"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Ryze1.webp",
+		"Level": 1,
+		"Cost": 3,
+		"Power": 3,
+		"Keyword": [],
+		"Skill": "{Game Start}: Shuffle the World Runes into your deck.",
+		"LevelUp": "You've played {worldrunes_threshold}+ different World Runes.",
+		"LevelUpTo": "Ryze2",
+		"AbilityType": "",
+		"BalanceValues": {"worldrunes_threshold": 3},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"Ryze2": {
+		"Name": "Ryze",
+		"Region": ["Runeterra"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Ryze2.webp",
+		"Level": 2,
+		"Cost": 3,
+		"Power": 4,
+		"Keyword": [],
+		"Skill": "{Round End}: If you have 5 different World Runes in play, you win the game.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"ShardofViolence": {
+		"Name": "Shard of Violence",
+		"Region": ["Runeterra"],
+		"Type": "Landmark",
+		"SubType": "World Rune",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/ShardofViolence.webp",
+		"Cost": 1,
+		"Keyword": ["Landmark"],
+		"Skill": "{Play}: Draw {draw_count}. [br] When I'm {Played}, if I'm unique, activate your other World Runes.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"draw_count": 1},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"ShardofBetrayal": {
+		"Name": "Shard of Betrayal",
+		"Region": ["Runeterra"],
+		"Type": "Landmark",
+		"SubType": "World Rune",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/ShardofBetrayal.webp",
+		"Cost": 1,
+		"Keyword": ["Landmark"],
+		"Skill": "{Play}: Grant the strongest enemy -{power_reduction} Power. [br] When I'm {Played}, if I'm unique, activate your other World Runes.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"power_reduction": 1},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"ShardofReverence": {
+		"Name": "Shard of Reverence",
+		"Region": ["Runeterra"],
+		"Type": "Landmark",
+		"SubType": "World Rune",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/ShardofReverence.webp",
+		"Cost": 1,
+		"Keyword": ["Landmark"],
+		"Skill": "{Play}: Next turn, you get +{mana_bonus} mana. [br] When I'm {Played}, if I'm unique, activate your other World Runes.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"mana_bonus": 1},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"ShardofHope": {
+		"Name": "Shard of Hope",
+		"Region": ["Runeterra"],
+		"Type": "Landmark",
+		"SubType": "World Rune",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/ShardofHope.webp",
+		"Cost": 1,
+		"Keyword": ["Landmark"],
+		"Skill": "{Play}: Grant the weakest ally +{power_bonus} Power. [br] When I'm {Played}, if I'm unique, activate your other World Runes.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"power_bonus": 1},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+	"ShardofMadness": {
+		"Name": "Shard of Madness",
+		"Region": ["Runeterra"],
+		"Type": "Landmark",
+		"SubType": "World Rune",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/ShardofMadness.webp",
+		"Cost": 1,
+		"Keyword": ["Landmark"],
+		"Skill": "{Play}: :Stun:{Stun} the strongest enemy. [br] When I'm {Played}, if I'm unique, activate your other World Runes.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"power_bonus": 1},
+		"PreviewTooltip": ["Ryze1", "Ryze2", "ShardofViolence", "ShardofBetrayal", "ShardofReverence", "ShardofHope", "ShardofMadness"]
+	},
+
+	# Champion - Galio line
+	"Galio1": {
+		"Name": "Galio",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": true,
+		"Sprite": "res://Assets/CardSprites/Galio1.webp",
+		"Level": 1,
+		"Cost": 14,
+		"Power": 10,
+		"Keyword": [],
+		"Skill": "I cost 1 less for each mana you've spent this game. [br] {Round End}: If I'm in your hand, pay my cost to summon me to the losing lane.",
+		"LevelUp": "You've spent {mana_threshold}+ mana.",
+		"LevelUpTo": "Galio2",
+		"AbilityType": "",
+		"BalanceValues": {"mana_threshold": 14},
+		"PreviewTooltip": ["Galio1", "Galio2"]
+	},
+	"Galio2": {
+		"Name": "Galio",
+		"Region": ["Demacia"],
+		"Type": "Champion",
+		"SubType": "",
+		"Collectible": false,
+		"Sprite": "res://Assets/CardSprites/Galio2.webp",
+		"Level": 2,
+		"Cost": 0,
+		"Power": 10,
+		"Keyword": [],
+		"Skill": "{Round End}: If I'm in your hand, summon me to the losing lane. [br] When another ally activates {Play} effect, {Rally} it.",
+		"LevelUp": "",
+		"LevelUpTo": null,
+		"AbilityType": "",
+		"BalanceValues": {"mana_threshold": 14},
+		"PreviewTooltip": ["Galio1", "Galio2"]
 	},
 	
 	# Landmarks
@@ -630,7 +1136,7 @@ const CARDS = {
 		"Collectible": false,
 		"Sprite": "res://Assets/CardSprites/BuriedSunDisc.webp",
 		"Cost": 0,
-		"Keyword": [],
+		"Keyword": ["Landmark"],
 		"Skill": "Once you have {ascended_threshold}+ level 2 Ascended allies in play, {restore the Sun Disc}.",
 		"LevelUpTo": "RestoredSunDisc",
 		"AbilityType": "transform_landmark",
@@ -645,7 +1151,7 @@ const CARDS = {
 		"Collectible": false,
 		"Sprite": "res://Assets/CardSprites/RestoredSunDisc.webp",
 		"Cost": 0,
-		"Keyword": [],
+		"Keyword": ["Landmark"],
 		"Skill": "Draw {draw_count} for each Ascended ally that is not beheld. [br] For the rest of the game, your level 2 Ascended allies are level 3.",
 		"LevelUpTo": null,
 		"AbilityType": "ascend_champions",
@@ -819,22 +1325,39 @@ const CARDS = {
 		"BalanceValues": {},
 		"PreviewTooltip": ["TerrorOfTheTides"]
 	},
+
+	# Spells
+
 }
 
 
 static func populate_card_visuals(card: Node, card_data: Dictionary, source_card: Node = null) -> void:
 	"""Populate all visual text and sprite nodes on a card from card_data.
-	Single source of truth for card display — replaces duplicated setup blocks
-	that previously appeared in Deck.gd, CardManager.gd, and Card.gd."""
+	Type-aware: handles Unit (Champion/Follower), Spell, and Landmark card scenes."""
+	var card_type := str(card_data.get("Type", ""))
+	var is_spell := card_type == "Spell"
+	var is_landmark := card_type == "Landmark"
+
 	var name_label = card.get_node_or_null("CardFront/TextContainer/CardName")
 	if name_label:
 		name_label.text = str(card_data.get("Name", ""))
+		var available_width := 530.0
+		var name_font: Font = name_label.get_theme_font("normal_font")
+		var font_size := 64
+		var min_font_size := 36
+		if name_font:
+			while font_size > min_font_size:
+				if name_font.get_string_size(name_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= available_width:
+					break
+				font_size -= 2
+		name_label.add_theme_font_size_override("normal_font_size", font_size)
 
 	var cost_label = card.get_node_or_null("CardFront/Cost")
 	if cost_label:
 		cost_label.text = str(card_data.get("Cost", 0))
 
-	apply_power_visual(card, card_data, source_card)
+	if not is_spell and not is_landmark:
+		apply_power_visual(card, card_data, source_card)
 
 	var skill_label = card.get_node_or_null("CardFront/TextContainer/Skill")
 	var skill_text: String = str(card_data.get("Skill", ""))
@@ -844,6 +1367,28 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	else:
 		skill_label.visible = false
 
+	if not is_spell and not is_landmark:
+		_apply_level_up_visual(card, card_data)
+
+	var sprite_path: String = str(card_data.get("Sprite", ""))
+	if sprite_path != "":
+		var sprite_node: Node = null
+		if is_spell:
+			sprite_node = card.get_node_or_null("CardFront/CardSpellSpriteParent/CardSpellSprite")
+		else:
+			sprite_node = card.get_node_or_null("CardFront/CardSpriteParent/CardSprite")
+		if sprite_node:
+			sprite_node.texture = ResourceLoader.load(sprite_path)
+
+	if not is_spell and not is_landmark:
+		_apply_subtype_visual(card, card_data)
+
+	_apply_region_visual(card, card_data, is_spell)
+
+	_apply_keyword_visual(card, card_data)
+
+
+static func _apply_level_up_visual(card: Node, card_data: Dictionary) -> void:
 	var level_up_raw = card_data.get("LevelUp", null)
 	var level_up_text: String = str(level_up_raw) if level_up_raw != null else ""
 	var has_level_up := level_up_raw != null and level_up_text != ""
@@ -855,12 +1400,8 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	if lv_sep:
 		lv_sep.visible = has_level_up
 
-	var sprite_path: String = str(card_data.get("Sprite", ""))
-	if sprite_path != "":
-		var sprite_node = card.get_node_or_null("CardFront/CardSpriteParent/CardSprite")
-		if sprite_node:
-			sprite_node.texture = ResourceLoader.load(sprite_path)
 
+static func _apply_subtype_visual(card: Node, card_data: Dictionary) -> void:
 	var sub_type: String = str(card_data.get("SubType", ""))
 	var has_sub_type := sub_type != ""
 	var sub_label = card.get_node_or_null("CardFront/SubType")
@@ -872,16 +1413,24 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	if sub_bg:
 		sub_bg.visible = has_sub_type
 
+
+static func _apply_region_visual(card: Node, card_data: Dictionary, is_spell: bool) -> void:
 	var region: Array = card_data.get("Region", [])
-	var region_sprite_node_1 = card.get_node_or_null("CardFront/TextContainer/RegionContainer/Region1")
-	var region_sprite_node_2 = card.get_node_or_null("CardFront/TextContainer/RegionContainer/Region2")
-	
-	region_sprite_node_1.texture = ResourceLoader.load("res://Assets/RegionSprites/" + (region[0].replace(" ", "")) + ".webp")
+	var region_container_path := "CardFront/TextContainer/RegionContainer" if not is_spell else "CardFront/RegionContainer"
+	var region_sprite_node_1 = card.get_node_or_null(region_container_path + "/Region1")
+	var region_sprite_node_2 = card.get_node_or_null(region_container_path + "/Region2")
+
+	if region.size() > 0 and region_sprite_node_1:
+		region_sprite_node_1.texture = ResourceLoader.load("res://Assets/RegionSprites/" + (region[0].replace(" ", "")) + ".webp")
+		region_sprite_node_1.visible = true
 	if region.size() > 1 and region_sprite_node_2:
 		region_sprite_node_2.texture = ResourceLoader.load("res://Assets/RegionSprites/" + (region[1].replace(" ", "")) + ".webp")
-	else:
+		region_sprite_node_2.visible = true
+	elif region_sprite_node_2:
 		region_sprite_node_2.visible = false
 
+
+static func _apply_keyword_visual(card: Node, card_data: Dictionary) -> void:
 	var keywords: Array = card_data.get("Keyword", [])
 	var keyword_container = card.get_node_or_null("CardFront/TextContainer/KeywordContainer")
 	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
@@ -889,20 +1438,30 @@ static func populate_card_visuals(card: Node, card_data: Dictionary, source_card
 	if keyword_container:
 		for child in keyword_container.get_children():
 			child.queue_free()
-	if keywords.size() > 0:
-		keyword_container.visible = true
-		for keyword in keywords:
-			var item = keyword_item_scene.instantiate()
-			var keyword_sprite_path = "res://Assets/KeywordSprites/" + str(keyword) + ".webp"
-			item.get_node("KeywordSprite").texture = ResourceLoader.load(keyword_sprite_path)
-			keyword_container.add_child(item)
-	else:
+	if keywords.size() == 0:
 		keyword_container.visible = false
+		return
+	keyword_container.visible = true
+	var show_name := keywords.size() < 3
+	for keyword in keywords:
+		var item = keyword_item_scene.instantiate()
+		var keyword_sprite_path = "res://Assets/KeywordSprites/" + str(keyword) + ".webp"
+		item.get_node("HBoxContainer/SpriteMargin/KeywordSprite").texture = ResourceLoader.load(keyword_sprite_path)
+		if show_name:
+			item.get_node("HBoxContainer/KeywordName").text = keyword
+		else:
+			item.get_node("HBoxContainer/KeywordName").visible = false
+		keyword_container.add_child(item)
 
 
 static func format_card_text(text: String, balance_values: Dictionary = {}) -> String:
-	"""Replace {..} with gold (substituting balance_values if key matches) and [..] with blue,
-	while preserving real BBCode tags (e.g. [br])."""
+	"""Mirrors the web frontend formatCardText:
+	- {key} → substitute balance value, or render gold
+	- [CardName] → render blue
+	- [br] → line break
+	- :Keyword: → keyword icon + name
+	- :Keyword:{Vocab} → keyword icon + vocab value
+	- -{Vocab} → minus + vocab value (nowrap)"""
 	var result := ""
 	var i := 0
 
@@ -913,11 +1472,51 @@ static func format_card_text(text: String, balance_values: Dictionary = {}) -> S
 			var close_idx := text.find("]", i + 1)
 			if close_idx != -1:
 				var content := text.substr(i + 1, close_idx - i - 1)
-				if _is_bbcode_tag(content):
+				if content == "br":
+					result += "[br]"
+				elif _is_bbcode_tag(content):
 					result += text.substr(i, close_idx - i + 1)
 				else:
 					result += "[color=#54a5ff]" + content + "[/color]"
 				i = close_idx + 1
+				continue
+
+		if c == ":":
+			var close_idx := text.find(":", i + 1)
+			if close_idx != -1 and close_idx > i + 1:
+				var content := text.substr(i + 1, close_idx - i - 1)
+				if content.is_valid_identifier() or content.is_valid_int():
+					var img_bbcode := '[img=32x32]res://Assets/KeywordSprites/' + content + '.webp[/img]'
+					var next_pos := close_idx + 1
+					if next_pos < text.length() and text[next_pos] == "{":
+						var vocab_close := text.find("}", next_pos + 1)
+						if vocab_close != -1:
+							var vocab_content := text.substr(next_pos + 1, vocab_close - next_pos - 1)
+							var vocab_val: String
+							if balance_values.has(vocab_content):
+								vocab_val = str(balance_values[vocab_content])
+							else:
+								vocab_val = "[color=#ffca4b]" + vocab_content + "[/color]"
+							result += img_bbcode + vocab_val
+							i = vocab_close + 1
+							continue
+					result += img_bbcode + content
+					i = close_idx + 1
+					continue
+
+		if c == "-" and i + 1 < text.length() and text[i + 1] == "{":
+			var close_brace := text.find("}", i + 2)
+			if close_brace != -1:
+				var content := text.substr(i + 2, close_brace - i - 2)
+				if result.ends_with(" "):
+					result = result.substr(0, result.length() - 1) + " "
+				var vocab_val: String
+				if balance_values.has(content):
+					vocab_val = str(balance_values[content])
+				else:
+					vocab_val = "[color=#ffca4b]" + content + "[/color]"
+				result += "-" + vocab_val
+				i = close_brace + 1
 				continue
 
 		if c == "{":
@@ -987,6 +1586,40 @@ static func _is_bbcode_tag(content: String) -> bool:
 	return known_tags.has(tag)
 
 
+static func get_collectible_cards() -> Array:
+	"""Returns all Collectible=true cards as an Array of dicts (with 'id' injected),
+	sorted Champions first, then by Cost ascending, then Name alphabetically."""
+	var result: Array = []
+	for card_id in CARDS:
+		var data: Dictionary = CARDS[card_id]
+		if data.get("Collectible", false):
+			var entry := data.duplicate()
+			entry["id"] = card_id
+			result.append(entry)
+	result.sort_custom(func(a, b):
+		var a_champ := 1 if a.get("Type", "") != "Champion" else 0
+		var b_champ := 1 if b.get("Type", "") != "Champion" else 0
+		if a_champ != b_champ:
+			return a_champ < b_champ
+		if a.get("Cost", 0) != b.get("Cost", 0):
+			return a.get("Cost", 0) < b.get("Cost", 0)
+		return a.get("Name", "") < b.get("Name", ""))
+	return result
+
+
+static func get_related_cards(card_id: String) -> Array:
+	"""Returns card data dicts (with 'id') for every entry in the card's PreviewTooltip list."""
+	var data: Dictionary = CARDS.get(card_id, {})
+	var tooltip_ids: Array = data.get("PreviewTooltip", [])
+	var result: Array = []
+	for tid in tooltip_ids:
+		var td: Dictionary = CARDS.get(str(tid), {})
+		if not td.is_empty():
+			var entry := td.duplicate()
+			entry["id"] = str(tid)
+			result.append(entry)
+	return result
+
 static func get_card_id_by_name(card_name: String, prefer_collectible: bool = false) -> String:
 	"""Find the first card ID matching the given name.
 	If prefer_collectible is true, prioritise Collectible entries."""
@@ -998,6 +1631,28 @@ static func get_card_id_by_name(card_name: String, prefer_collectible: bool = fa
 			if fallback == "":
 				fallback = id
 	return fallback
+
+
+static func get_card_scene(card_data: Dictionary) -> PackedScene:
+	var card_type := str(card_data.get("Type", ""))
+	match card_type:
+		"Spell":
+			return CARD_SPELL_SCENE
+		"Landmark":
+			return CARD_LANDMARK_SCENE
+		_:
+			return CARD_SCENE
+
+
+static func get_card_script(card_data: Dictionary) -> Script:
+	var card_type := str(card_data.get("Type", ""))
+	match card_type:
+		"Spell":
+			return preload("res://Scripts/CardSpell.gd")
+		"Landmark":
+			return preload("res://Scripts/CardLandmark.gd")
+		_:
+			return preload("res://Scripts/Card.gd")
 
 
 static func apply_power_visual(card_node: Node, card_data: Dictionary, source_card: Node = null) -> void:

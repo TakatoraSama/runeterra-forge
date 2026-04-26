@@ -26,6 +26,15 @@ const COLUMNS := 3
 const ROWS := 2
 const SLOTS_PER_CARD := 4
 
+# Spell zone layout — one vertical column of 4 slots per player at 0.1 scale
+const SPELL_SLOT_SCALE := 0.1
+const SPELL_SLOT_SIZE  := Vector2(630.0 * SPELL_SLOT_SCALE, 880.0 * SPELL_SLOT_SCALE)
+const ALLIED_SPELL_ORIGIN := Vector2(483.0, 533.0)   # center of slot 1 (fills top → bottom)
+const ENEMY_SPELL_ORIGIN  := Vector2(1436.0, 346.0)  # center of slot 1 (fills bottom → top)
+const SPELL_ZONE_ALLIED := Vector2i(-1, 1)
+const SPELL_ZONE_ENEMY  := Vector2i(-1, 0)
+const SPELL_SLOTS_COUNT := 4
+
 const LANE_POSITIONS := {
 	0: Vector2(700, 440),
 	1: Vector2(960, 440),
@@ -56,6 +65,7 @@ var lane_data_by_col := {}
 func _ready() -> void:
 	setup_zone_ownership()
 	create_all_slots()
+	_create_spell_zones()
 	if DEBUG_DRAW_ZONES:
 		queue_redraw()
 
@@ -197,9 +207,9 @@ func create_all_slots() -> Dictionary:
 			var zone_key := Vector2i(col, row)
 			slots_by_zone[zone_key] = []
 
-			# Row 0 (opponent, top): fill from bottom-left toward board center: BL, BR, TL, TR
+			# Row 0 (opponent, top): fill from bottom-right toward board center: BR, BL, TR, TL
 			# Row 1 (player, bottom): fill from top-left toward board center: TL, TR, BL, BR
-			var slot_order: Array = [2, 3, 0, 1] if row == 0 else [0, 1, 2, 3]
+			var slot_order: Array = [3, 2, 1, 0] if row == 0 else [0, 1, 2, 3]
 
 			for slot in slot_order:
 				var slot_instance := card_slot_scene.instantiate()
@@ -221,6 +231,33 @@ func create_all_slots() -> Dictionary:
 			_create_zone_power_label(zone_key)
 
 	return slots
+
+
+func _create_spell_zones() -> void:
+	"""Create a vertical 4-slot spell zone for each player and register them in slots_by_zone."""
+	# Allied spell zone (player 1): slots fill top → bottom
+	slots_by_zone[SPELL_ZONE_ALLIED] = []
+	cards_by_zone[SPELL_ZONE_ALLIED] = []
+	zone_owners[SPELL_ZONE_ALLIED] = 1
+	for i in range(SPELL_SLOTS_COUNT):
+		var slot := card_slot_scene.instantiate()
+		slot.z_index = -12
+		add_child(slot)  # _ready() runs here; set transform after
+		slot.get_node("CardSlotImage").scale = Vector2(SPELL_SLOT_SCALE, SPELL_SLOT_SCALE)
+		slot.position = ALLIED_SPELL_ORIGIN + Vector2(0.0, i * SPELL_SLOT_SIZE.y)
+		slots_by_zone[SPELL_ZONE_ALLIED].append(slot)
+
+	# Enemy spell zone (player 0): slots fill bottom → top
+	slots_by_zone[SPELL_ZONE_ENEMY] = []
+	cards_by_zone[SPELL_ZONE_ENEMY] = []
+	zone_owners[SPELL_ZONE_ENEMY] = 0
+	for i in range(SPELL_SLOTS_COUNT):
+		var slot := card_slot_scene.instantiate()
+		slot.z_index = -12
+		add_child(slot)  # _ready() runs here; set transform after
+		slot.get_node("CardSlotImage").scale = Vector2(SPELL_SLOT_SCALE, SPELL_SLOT_SCALE)
+		slot.position = ENEMY_SPELL_ORIGIN - Vector2(0.0, i * SPELL_SLOT_SIZE.y)
+		slots_by_zone[SPELL_ZONE_ENEMY].append(slot)
 
 
 func _create_zone_power_label(zone_key: Vector2i) -> void:
@@ -251,6 +288,30 @@ func update_zone_power_texts(power_by_zone: Dictionary) -> void:
 
 
 func get_next_available_slot_for_position(world_pos: Vector2):
+	# Spell zones sit outside the lane grid, so check them first before the
+	# grid-bounds early-returns would discard the position.
+	var allied_rect := Rect2(
+		ALLIED_SPELL_ORIGIN + Vector2(-SPELL_SLOT_SIZE.x * 0.5, -SPELL_SLOT_SIZE.y * 0.5),
+		Vector2(SPELL_SLOT_SIZE.x, SPELL_SLOT_SIZE.y * SPELL_SLOTS_COUNT)
+	)
+	if allied_rect.has_point(world_pos):
+		for slot_instance in slots_by_zone.get(SPELL_ZONE_ALLIED, []):
+			if not slot_instance.card_in_slot:
+				return slot_instance
+		return null
+
+	var enemy_top_y := ENEMY_SPELL_ORIGIN.y - (SPELL_SLOTS_COUNT - 1) * SPELL_SLOT_SIZE.y
+	var enemy_rect := Rect2(
+		Vector2(ENEMY_SPELL_ORIGIN.x - SPELL_SLOT_SIZE.x * 0.5, enemy_top_y - SPELL_SLOT_SIZE.y * 0.5),
+		Vector2(SPELL_SLOT_SIZE.x, SPELL_SLOT_SIZE.y * SPELL_SLOTS_COUNT)
+	)
+	if enemy_rect.has_point(world_pos):
+		for slot_instance in slots_by_zone.get(SPELL_ZONE_ENEMY, []):
+			if not slot_instance.card_in_slot:
+				return slot_instance
+		return null
+
+	# Lane zone logic
 	var local_pos := world_pos - GRID_ORIGIN_TOP_LEFT
 	if local_pos.x < 0 or local_pos.y < 0:
 		return null
@@ -457,3 +518,7 @@ func get_card_slot_index_in_zone(zone_key: Vector2i, card: Node2D) -> int:
 		return -1
 	var zone_slots = slots_by_zone.get(zone_key, [])
 	return zone_slots.find(card.card_slot_is_in)
+
+
+func is_spell_zone(zone_key: Vector2i) -> bool:
+	return zone_key == SPELL_ZONE_ALLIED or zone_key == SPELL_ZONE_ENEMY

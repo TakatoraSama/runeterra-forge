@@ -1,0 +1,118 @@
+[gd_scene format=3 uid="uid://byjswyrj5ceke"]
+
+[ext_resource type="Script" path="res://Scripts/DeckBuilder.gd" id="1_builder"]
+[ext_resource type="PackedScene" path="res://Scenes/CardPreview.tscn" id="2_preview"]
+
+[node name="DeckBuilder" type="Node"]
+script = ExtResource("1_builder")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Background" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.07, 0.1, 1)
+
+[node name="HBox" type="HBoxContainer" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+; ─── Left: Deck Panel ────────────────────────────────────────────────────────
+
+[node name="DeckPanel" type="PanelContainer" parent="UI/HBox"]
+custom_minimum_size = Vector2(488, 0)
+
+[node name="VBox" type="VBoxContainer" parent="UI/HBox/DeckPanel"]
+
+[node name="Header" type="HBoxContainer" parent="UI/HBox/DeckPanel/VBox"]
+custom_minimum_size = Vector2(0, 48)
+
+[node name="DeckNameField" type="LineEdit" parent="UI/HBox/DeckPanel/VBox/Header"]
+size_flags_horizontal = 3
+placeholder_text = "Deck name…"
+text = "My Deck"
+
+[node name="LoadOption" type="OptionButton" parent="UI/HBox/DeckPanel/VBox/Header"]
+custom_minimum_size = Vector2(120, 0)
+
+[node name="HSep0" type="HSeparator" parent="UI/HBox/DeckPanel/VBox"]
+
+[node name="DeckCountLabel" type="Label" parent="UI/HBox/DeckPanel/VBox"]
+text = "Deck (0 / 12)"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 14
+
+[node name="DeckScroll" type="ScrollContainer" parent="UI/HBox/DeckPanel/VBox"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="DeckGrid" type="GridContainer" parent="UI/HBox/DeckPanel/VBox/DeckScroll"]
+size_flags_horizontal = 3
+columns = 3
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+
+[node name="HSep1" type="HSeparator" parent="UI/HBox/DeckPanel/VBox"]
+
+[node name="Footer" type="HBoxContainer" parent="UI/HBox/DeckPanel/VBox"]
+custom_minimum_size = Vector2(0, 48)
+alignment = 1
+
+[node name="BackButton" type="Button" parent="UI/HBox/DeckPanel/VBox/Footer"]
+custom_minimum_size = Vector2(100, 0)
+text = "← Back"
+
+[node name="CancelButton" type="Button" parent="UI/HBox/DeckPanel/VBox/Footer"]
+custom_minimum_size = Vector2(100, 0)
+text = "Cancel"
+
+[node name="SaveButton" type="Button" parent="UI/HBox/DeckPanel/VBox/Footer"]
+custom_minimum_size = Vector2(100, 0)
+text = "Save"
+
+; ─── Right: Collection Panel ─────────────────────────────────────────────────
+
+[node name="CollectionPanel" type="VBoxContainer" parent="UI/HBox"]
+size_flags_horizontal = 3
+
+[node name="FilterBar" type="HBoxContainer" parent="UI/HBox/CollectionPanel"]
+custom_minimum_size = Vector2(0, 56)
+
+[node name="RegionBar" type="HBoxContainer" parent="UI/HBox/CollectionPanel/FilterBar"]
+
+[node name="VSep1" type="VSeparator" parent="UI/HBox/CollectionPanel/FilterBar"]
+
+[node name="CostBar" type="HBoxContainer" parent="UI/HBox/CollectionPanel/FilterBar"]
+
+[node name="VSep2" type="VSeparator" parent="UI/HBox/CollectionPanel/FilterBar"]
+
+[node name="SearchField" type="LineEdit" parent="UI/HBox/CollectionPanel/FilterBar"]
+size_flags_horizontal = 3
+placeholder_text = "Search cards…"
+
+[node name="CollectionScroll" type="ScrollContainer" parent="UI/HBox/CollectionPanel"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CollectionGrid" type="GridContainer" parent="UI/HBox/CollectionPanel/CollectionScroll"]
+size_flags_horizontal = 3
+columns = 5
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="CardPreview" parent="." instance=ExtResource("2_preview")]
+
+; ─── Signal connections ───────────────────────────────────────────────────────
+
+[connection signal="text_changed" from="UI/HBox/CollectionPanel/FilterBar/SearchField" to="." method="_on_search_changed"]
+[connection signal="item_selected" from="UI/HBox/DeckPanel/VBox/Header/LoadOption" to="." method="_on_load_option_selected"]
+[connection signal="pressed" from="UI/HBox/DeckPanel/VBox/Footer/BackButton" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="UI/HBox/DeckPanel/VBox/Footer/CancelButton" to="." method="_on_cancel_pressed"]
+[connection signal="pressed" from="UI/HBox/DeckPanel/VBox/Footer/SaveButton" to="." method="_on_save_pressed"]

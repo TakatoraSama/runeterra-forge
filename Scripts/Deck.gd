@@ -1,11 +1,8 @@
 extends Node2D
 
-const CARD_SCENE_PATH = "res://Scenes/Card.tscn"
 const CARD_DRAW_SPEED = 0.2
 
-# var player_deck = ["Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1", "Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1"]
-var player_deck = ["Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1", "Ahri1", "Kennen1", "NavoriConspirator", "SolitaryMonk", "Irelia1", "Rumble1"]
-# var player_deck = ["Azir3", "Renekton3", "Nasus3", "Xerath3", "Tryndamere1", "Trundle1"]
+var player_deck = ["Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Ahri1", "Kennen1", "NavoriConspirator", "SolitaryMonk", "Draven1", "Rumble1", "Sion1"]
 var owner_player_id: int = 1  # Which player owns this deck (1 = bottom/local)
 
 
@@ -63,8 +60,14 @@ func draw_card() -> void:
 		$RichTextLabel.visible = false
 
 	$RichTextLabel.text = str(player_deck.size())
-	var card_scene = preload(CARD_SCENE_PATH)
+	var drawn_data = CardDatabase.CARDS[card_drawn]
+	var card_scene = CardDatabase.get_card_scene(drawn_data)
+	if card_scene == null:
+		print("Deck.draw_card: failed to load scene for ", card_drawn)
+		return
 	var new_card = card_scene.instantiate()
+	if new_card.get_script() == null:
+		new_card.set_script(CardDatabase.get_card_script(drawn_data))
 
 	# Store card ID and ownership for ability system
 	new_card.card_id = card_drawn
@@ -74,7 +77,6 @@ func draw_card() -> void:
 	new_card.position = Vector2(150, 940)
 
 	# Set card text
-	var drawn_data = CardDatabase.CARDS[card_drawn]
 	CardDatabase.populate_card_visuals(new_card, drawn_data)
 
 	$"../CardManager".add_child(new_card)
@@ -104,14 +106,14 @@ func draw_specific_cards(card_ids: Array) -> void:
 			$RichTextLabel.visible = false
 
 		$RichTextLabel.text = str(player_deck.size())
-		var card_scene = preload(CARD_SCENE_PATH)
+		var drawn_data = CardDatabase.CARDS[cid]
+		var card_scene = CardDatabase.get_card_scene(drawn_data)
 		var new_card = card_scene.instantiate()
 
 		new_card.card_id = cid
 		new_card.owner_player_id = owner_player_id
 		new_card.position = Vector2(150, 940)
 
-		var drawn_data = CardDatabase.CARDS[cid]
 		CardDatabase.populate_card_visuals(new_card, drawn_data)
 
 		$"../CardManager".add_child(new_card)

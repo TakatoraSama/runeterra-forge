@@ -11,12 +11,13 @@ config_version=5
 [application]
 
 config/name="Runeterra Forge"
-run/main_scene="uid://dt0haunvy1sin"
+run/main_scene="res://Scenes/HomeScreen.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://Assets/icon.svg"
 
 [autoload]
 
+DeckManager="*res://Scripts/DeckManager.gd"
 AbilityResolver="*res://Scripts/AbilityResolver.gd"
 LevelUpManager="*res://Scripts/LevelUpManager.gd"
 AuraSystem="*res://Scripts/AuraSystem.gd"

@@ -1,36 +1,52 @@
 [gd_scene format=3 uid="uid://cfhhnn7d3wdnf"]
 
+[ext_resource type="Script" uid="uid://c4kar38lj8yrm" path="res://Scripts/KeywordItem.gd" id="0_kitem"]
 [ext_resource type="Texture2D" uid="uid://chaqfl5ssg2se" path="res://Assets/CardComponent/card_keyword.png" id="1_kwbg"]
-[ext_resource type="Texture2D" uid="uid://dk6cqwl28uy0w" path="res://Assets/KeywordSprites/Elusive.webp" id="2_krjn5"]
+[ext_resource type="Texture2D" uid="uid://7khvq3rxbai6" path="res://Assets/KeywordSprites/Challenger.webp" id="2_krjn5"]
+[ext_resource type="FontFile" uid="uid://64wxf2wygebb" path="res://Fonts/beaufort/BeaufortforLOL-Medium.ttf" id="3_l8xnu"]
 
-[node name="KeywordItem" type="Control" unique_id=1979124775]
-custom_minimum_size = Vector2(84, 72)
-layout_mode = 3
-anchors_preset = 0
+[node name="KeywordItem" type="NinePatchRect" unique_id=2021540559]
+offset_right = 20.0
+offset_bottom = 20.0
+texture = ExtResource("1_kwbg")
+patch_margin_left = 10
+patch_margin_top = 10
+patch_margin_right = 10
+patch_margin_bottom = 10
+script = ExtResource("0_kitem")
 
-[node name="KeywordBG" type="TextureRect" parent="." unique_id=1932402648]
+[node name="HBoxContainer" type="HBoxContainer" parent="." unique_id=908525573]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 8.0
+offset_right = -12.0
+offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 2
-texture = ExtResource("1_kwbg")
-expand_mode = 5
+theme_override_constants/separation = 8
+alignment = 1
 
-[node name="KeywordSprite" type="TextureRect" parent="." unique_id=1130007994]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -24.0
-offset_top = -24.0
-offset_right = 24.0
-offset_bottom = 24.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="SpriteMargin" type="MarginContainer" parent="HBoxContainer" unique_id=196839786]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="KeywordSprite" type="TextureRect" parent="HBoxContainer/SpriteMargin" unique_id=998767701]
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
 texture = ExtResource("2_krjn5")
 expand_mode = 2
-stretch_mode = 6
+
+[node name="KeywordName" type="Label" parent="HBoxContainer" unique_id=1302615451]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.93333334, 0.8, 0.4862745, 1)
+theme_override_fonts/font = ExtResource("3_l8xnu")
+theme_override_font_sizes/font_size = 26
+text = "Challenger"
+vertical_alignment = 1
+uppercase = true

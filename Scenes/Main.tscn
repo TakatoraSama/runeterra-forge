@@ -12,8 +12,9 @@
 [ext_resource type="PackedScene" path="res://Scenes/LobbyUI.tscn" id="10_lobby"]
 [ext_resource type="PackedScene" path="res://Scenes/SettingsUI.tscn" id="11_settings"]
 [ext_resource type="PackedScene" uid="uid://bmtjnfemn6vs4" path="res://Scenes/CardPreview.tscn" id="12_preview"]
-[ext_resource type="PackedScene" path="res://Scenes/LanePreview.tscn" id="13_lnprev"]
 [ext_resource type="FontFile" uid="uid://bh0252bjv1o3m" path="res://Fonts/beaufort/BeaufortforLOL-Bold.ttf" id="13_frkhe"]
+[ext_resource type="PackedScene" path="res://Scenes/LanePreview.tscn" id="13_lnprev"]
+[ext_resource type="Texture2D" uid="uid://b3iihhr2i43o3" path="res://Assets/LaneComponent/lor_boardvisual_template.png" id="15_h1m7h"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_fos0i"]
 size = Vector2(126, 176)
@@ -116,7 +117,7 @@ script = ExtResource("9_netmgr")
 
 [node name="CardPreview" parent="." unique_id=1129544455 instance=ExtResource("12_preview")]
 
-[node name="LanePreview" parent="." instance=ExtResource("13_lnprev")]
+[node name="LanePreview" parent="." unique_id=1675946579 instance=ExtResource("13_lnprev")]
 
 [node name="VictoryText" type="RichTextLabel" parent="." unique_id=2091700865]
 visible = false
@@ -143,3 +144,8 @@ vertical_alignment = 1
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=239596555]
 environment = SubResource("Environment_frkhe")
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=976350199]
+z_index = -999
+position = Vector2(960, 540)
+texture = ExtResource("15_h1m7h")

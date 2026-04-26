@@ -147,7 +147,7 @@ func _summon_card_in_lane(card_id: String, col: int, player_id: int) -> void:
 		print("LaneManager._summon_card_in_lane: no available slot in lane %d for player %d" % [col, player_id])
 		return
 
-	var card_scene = load("res://Scenes/Card.tscn")
+	var card_scene = CardDatabase.get_card_scene(card_data)
 	var new_card = card_scene.instantiate()
 
 	new_card.card_id = card_id

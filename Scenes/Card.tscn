@@ -547,7 +547,7 @@ vertical_alignment = 1
 [node name="KeywordContainer" type="HBoxContainer" parent="CardFront/TextContainer" unique_id=1623630910]
 z_index = -5
 layout_mode = 2
-theme_override_constants/separation = 64
+theme_override_constants/separation = 32
 alignment = 1
 
 [node name="Skill" type="RichTextLabel" parent="CardFront/TextContainer" unique_id=690361111]

@@ -44,6 +44,8 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
+	_check_sion_levelup()
+	_check_draven_levelup()
 	_check_sun_disc_transform()
 
 
@@ -57,27 +59,9 @@ func check_level_ups_after_abilities() -> void:
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
+	_check_sion_levelup()
+	_check_draven_levelup()
 	_check_sun_disc_transform()
-
-
-func check_level_up_by_power(card: Node) -> void:
-	"""Called by AbilityResolver after any ability that can increase power_modifier.
-	Renekton lv1 → lv2: levels up when power_modifier >= BalanceValues.power_threshold."""
-	var card_data = CardDatabase.CARDS.get(card.card_id)
-	if not card_data:
-		return
-	var level_up_to = card_data.get("LevelUpTo", null)
-	if level_up_to == null or str(level_up_to) == "":
-		return
-	# Only applies to cards whose on-board buff tracks towards a level-up.
-	if card_data.get("AbilityType", "") == "conditional_buff" and card_data.get("Level", 1) == 1:
-		var power_threshold: int = int(card_data.get("BalanceValues", {}).get("power_threshold", 4))
-		if card.get_total_power_modifier() >= power_threshold:
-			print("%s met level-up condition! (power_modifier=%d >= %d)" % [
-				card_data.get("Name", card.card_id), card.power_modifier, power_threshold])
-			card._perform_level_up(str(level_up_to))
-			# If Sun Disc is already restored, immediately push to lv3.
-			_check_ascended_sun_disc_upgrade(card)
 
 
 func check_conditional_buff_level_ups() -> void:
@@ -94,6 +78,32 @@ func check_conditional_buff_level_ups() -> void:
 		if not card.card_slot_is_in:
 			continue
 		check_level_up_by_power(card)
+
+
+func check_level_up_by_power(card: Node) -> void:
+	"""Check if a single card meets its power-increase level-up threshold.
+	Used by Renekton lv1 (conditional_buff type): levels up after power_modifier
+	reaches power_threshold via Round Start wins."""
+	if not is_instance_valid(card) or not card.is_resolved:
+		return
+	if not card.card_slot_is_in:
+		return
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+	var balance: Dictionary = card_data.get("BalanceValues", {})
+	if not balance.has("power_threshold"):
+		return
+	var power_threshold: int = int(balance.get("power_threshold", 0))
+	if card.power_modifier < power_threshold:
+		return
+	var level_up_to = card_data.get("LevelUpTo", "")
+	if not level_up_to or str(level_up_to) == "":
+		return
+	print("%s met power level-up threshold (%d/%d) — leveling up!" % [
+		card_data.get("Name", card.card_id), card.power_modifier, power_threshold])
+	card._perform_level_up(str(level_up_to))
+	_notify_zone_power_changed()
 
 
 # ─── Sun Disc helpers ──────────────────────────────────────────────────────────
@@ -484,6 +494,51 @@ func _check_sun_disc_transform() -> void:
 				_on_sun_disc_restored(owner_id)
 
 
+func _check_sion_levelup() -> void:
+	"""Sion lv1 → lv2: levels up when the owning player has discarded or summoned power_threshold+ total Power."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("Name", "") != "Sion" or card_data.get("Level", 1) != 1:
+			continue
+		if card.owner_player_id != cm.current_player_id:
+			continue
+
+		var power_threshold: int = int(card_data.get("BalanceValues", {}).get("power_threshold", 32))
+		var owner_id: int = int(card.owner_player_id)
+		var total_power := 0
+
+		for entry in cm.discarded_cards:
+			if int(entry.get("owner_player_id", -1)) == owner_id:
+				var entry_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
+				if entry_data and entry_data.has("Power"):
+					total_power += int(entry_data.get("Power", 0))
+
+		for entry in cm.summoned_cards:
+			if int(entry.get("owner_player_id", -1)) == owner_id:
+				var entry_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
+				if entry_data and entry_data.has("Power"):
+					total_power += int(entry_data.get("Power", 0))
+
+		if total_power < power_threshold:
+			continue
+
+		var level_up_to = card_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Sion lv1 met level-up condition! (player %d has %d total discarded/summoned power)" % [owner_id, total_power])
+			card._perform_level_up(str(level_up_to))
+			_notify_zone_power_changed()
+
+
 func _check_rumble_levelup() -> void:
 	"""Rumble lv1 → lv2: levels up when the owning player has discarded discard_threshold+ times."""
 	var cm := _get_card_manager()
@@ -519,6 +574,37 @@ func _check_rumble_levelup() -> void:
 		var level_up_to = card_data.get("LevelUpTo", "")
 		if level_up_to and str(level_up_to) != "":
 			print("Rumble lv1 met level-up condition! (player %d has %d discards)" % [owner_id, owner_discard_count])
+			card._perform_level_up(str(level_up_to))
+			_notify_zone_power_changed()
+
+
+func _check_draven_levelup() -> void:
+	"""Draven lv1 → lv2: levels up when he has seen axe_threshold+ Spinning Axes played
+	while he is on the board. Tracked per-Draven-instance via axe_play_count."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("Name", "") != "Draven" or card_data.get("Level", 1) != 1:
+			continue
+		if card.owner_player_id != cm.current_player_id:
+			continue
+
+		var axe_threshold: int = int(card_data.get("BalanceValues", {}).get("axe_threshold", 2))
+		if card.axe_play_count < axe_threshold:
+			continue
+
+		var level_up_to = card_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Draven lv1 met level-up condition! (saw %d Spinning Axe(s) played)" % card.axe_play_count)
 			card._perform_level_up(str(level_up_to))
 			_notify_zone_power_changed()
 

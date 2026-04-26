@@ -208,8 +208,22 @@ func finish_drag():
 				_return_card_to_hand()
 				return
 
-		# Check lane placement restriction (e.g. Noxkraya Arena turn 5)
-		if LaneManager.is_placement_restricted(zone_key):
+		# Card type vs zone restriction
+		var _drag_data = CardDatabase.CARDS.get(card_being_dragged.card_id, {})
+		var _drag_type: String = _drag_data.get("Type", "")
+		if board_reference.is_spell_zone(zone_key):
+			if _drag_type != "Spell":
+				print("Only spell cards can be played in the spell zone!")
+				_return_card_to_hand()
+				return
+		else:
+			if _drag_type == "Spell":
+				print("Spell cards must be played in the spell zone!")
+				_return_card_to_hand()
+				return
+
+		# Check lane placement restriction (e.g. Noxkraya Arena turn 5) — not for spell zones
+		if not board_reference.is_spell_zone(zone_key) and LaneManager.is_placement_restricted(zone_key):
 			print("Cards must be played in the active lane this turn (Noxkraya Arena)!")
 			_return_card_to_hand()
 			return
@@ -232,7 +246,8 @@ func finish_drag():
 				_return_card_to_hand()
 				return
 		
-		card_being_dragged.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+		var place_scale: float = board_reference.SPELL_SLOT_SCALE if board_reference.is_spell_zone(zone_key) else CARD_SMALLER_SCALE
+		card_being_dragged.scale = Vector2(place_scale, place_scale)
 		card_being_dragged.z_index = CARD_BOARD_Z_INDEX
 		card_being_dragged.card_slot_is_in = card_slot_found
 		player_hand_reference.remove_card_from_hand(card_being_dragged)
@@ -263,7 +278,8 @@ func finish_drag():
 			var card_id_str = str(card_being_dragged.card_id)
 			# Send the zone mirrored: my row 1 -> their row 0 (opponent's top)
 			var mirrored_zone = Vector2i(zone_key.x, 1 - zone_key.y)
-			rpc("_receive_opponent_card_play", card_id_str, mirrored_zone.x, mirrored_zone.y, card_being_dragged.power_modifier)
+			var power_mod: int = card_being_dragged.power_modifier if "power_modifier" in card_being_dragged else 0
+			rpc("_receive_opponent_card_play", card_id_str, mirrored_zone.x, mirrored_zone.y, power_mod)
 		card_being_dragged = null
 	else:
 		_return_card_to_hand()
@@ -313,10 +329,32 @@ func resolve_played_cards() -> void:
 				rpc("_receive_card_resolve_done", pre_summon_id)
 			else:
 				await _wait_for_opponent_card_resolve(pre_summon_id)
-		# Check if this resolve triggers any level-ups (e.g. Ice Pillar → Trundle)
+		# Track Spinning Axe plays for Draven level-up (must happen BEFORE level-up checks)
+		if card.card_id == "SpinningAxe":
+			for c in all_cards_in_play_order:
+				if is_instance_valid(c) and c.is_resolved and c.card_slot_is_in \
+						and c.owner_player_id == card.owner_player_id \
+						and "axe_play_count" in c:
+					var c_data = CardDatabase.CARDS.get(c.card_id)
+					if c_data and c_data.get("Name", "") == "Draven":
+						c.axe_play_count += 1
+						print("Draven (%s) has seen %d Spinning Axe(s) played" % [c.card_id, c.axe_play_count])
+		# Check if this resolve triggers any level-ups (e.g. Ice Pillar → Trundle, Draven → Spinning Axe count)
 		check_level_ups_after_resolve(card)
 		# Wait for any level-up animation triggered by this resolve to finish
 		await _wait_for_level_up()
+		# Spell cleanup: spells remove themselves from the zone after resolving
+		var card_type: String = str(CardDatabase.CARDS.get(card.card_id, {}).get("Type", ""))
+		if card_type == "Spell" and card.has_method("on_spell_resolved"):
+			if card.card_slot_is_in:
+				var zone_key: Vector2i = board_reference.get_zone_for_slot(card.card_slot_is_in)
+				card.card_slot_is_in.card_in_slot = false
+				if zone_key != Vector2i(-1, -1):
+					board_reference.remove_card_from_zone(zone_key, card)
+					board_reference.reposition_cards_in_zone(zone_key)
+				card.card_slot_is_in = null
+			await get_tree().create_timer(0.3).timeout
+			await card.on_spell_resolved()
 		# Update zone power display after each card resolves
 		_notify_zone_power_changed()
 		# Pause between each card so play effects (e.g. card created in hand) can finish animating
@@ -462,8 +500,10 @@ func create_card_in_hand(card_id_to_create: String, creator_card_id: String = ""
 		print("create_card_in_hand: unknown card id ", card_id_to_create)
 		return
 
-	var card_scene = load("res://Scenes/Card.tscn")
+	var card_scene = CardDatabase.get_card_scene(card_data)
 	var new_card = card_scene.instantiate()
+	if new_card.get_script() == null:
+		new_card.set_script(CardDatabase.get_card_script(card_data))
 
 	new_card.card_id = card_id_to_create
 	new_card.owner_player_id = current_player_id  # belongs to the local player
@@ -525,6 +565,7 @@ func track_summoned_card(card, was_played_from_hand: bool = false) -> void:
 	})
 	print("Card summoned tracked: %s (from_hand: %s, total: %d)" % [
 		card.card_id, was_played_from_hand, summoned_cards.size()])
+	LevelUpManager._check_sion_levelup()
 
 
 func track_created_card(card, creator_player_id: int, creator_card_id: String) -> void:
@@ -575,6 +616,13 @@ func discard_card_from_hand(card: Node, discarded_by_card_id: String = "") -> vo
 	await card.play_discard_dissolve()
 	player_hand_reference.update_hand_position(0.1)  # slide remaining cards after dissolve
 	track_discarded_card(card_id, owner_id, discarded_by_card_id)
+
+	# Trigger on-discard abilities (e.g. Sion1)
+	var card_data = CardDatabase.CARDS.get(card_id)
+	if card_data and card_data.get("AbilityType", "") == "on_discard_buff_create":
+		await AbilityResolver.execute_on_discard_ability(card)
+		LevelUpManager._check_sion_levelup()
+
 	card.queue_free()
 
 
@@ -786,6 +834,40 @@ func trigger_game_end_abilities() -> void:
 					_notify_zone_power_changed()
 					await get_tree().create_timer(CARD_PAUSE_TIMER).timeout
 
+	# Third pass — hand cards with {Game End} abilities (e.g. Sion2, SionReturned)
+	# These fire after all board Game End abilities, per player in flip-first order.
+	var player_ids: Array = [flip_first_player_id, 1 - flip_first_player_id] if flip_first_player_id >= 0 else [1, 0]
+	for player_id in player_ids:
+		if player_hand_reference:
+			# Snapshot hand cards since the ability may remove cards from hand
+			var hand_snapshot: Array = []
+			for c in player_hand_reference.player_hand:
+				if is_instance_valid(c) and c.owner_player_id == player_id:
+					hand_snapshot.append(c)
+
+			for hand_card in hand_snapshot:
+				if not is_instance_valid(hand_card):
+					continue
+				var hc_data = CardDatabase.CARDS.get(hand_card.card_id)
+				if not hc_data:
+					continue
+				# Check if this card has a {Game End} ability meant for hand cards
+				var ability_type: String = hc_data.get("AbilityType", "none")
+				var hand_ability_type: String = hc_data.get("HandAbilityType", "")
+				var effective_type = hand_ability_type if hand_ability_type != "" else ability_type
+				if effective_type != "game_end_summon_from_hand":
+					continue
+				# Check if the skill text actually contains {Game End}
+				var skill: String = hc_data.get("Skill", "")
+				if not ("{Game End}" in skill):
+					continue
+
+				print("Hand {Game End} triggered for: %s (player %d)" % [hc_data.get("Name", hand_card.card_id), player_id])
+				await AbilityResolver.execute_game_end_hand_ability(hand_card.card_id, hc_data, player_id)
+				await _wait_for_level_up()
+				_notify_zone_power_changed()
+				await get_tree().create_timer(CARD_PAUSE_TIMER).timeout
+
 
 # --- Multiplayer RPCs ---
 
@@ -932,25 +1014,28 @@ func _spawn_pending_opponent_cards() -> void:
 			print("No available slot for opponent card in zone: ", zone_key)
 			continue
 
-		var card_scene = load("res://Scenes/Card.tscn")
+		var card_data = CardDatabase.CARDS.get(card_id_str)
+		var card_scene = CardDatabase.get_card_scene(card_data)
 		var opp_card = card_scene.instantiate()
+		if opp_card.get_script() == null:
+			opp_card.set_script(CardDatabase.get_card_script(card_data))
 
 		opp_card.card_id = card_id_str
 		opp_card.owner_player_id = 0  # Opponent is always player 0 from our view
 
-		var card_data = CardDatabase.CARDS.get(card_id_str)
 		if card_data:
 			CardDatabase.populate_card_visuals(opp_card, card_data)
 
 		var power_mod: int = data.get("power_mod", 0)
-		if power_mod != 0:
+		if power_mod != 0 and "power_modifier" in opp_card:
 			opp_card.power_modifier = power_mod
 			var power_label = opp_card.get_node_or_null("CardFront/Power")
 			if power_label:
 				power_label.text = opp_card.get_power_display_text()
 
 		opp_card.position = available_slot.position
-		opp_card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+		var opp_scale: float = board_reference.SPELL_SLOT_SCALE if board_reference.is_spell_zone(zone_key) else CARD_SMALLER_SCALE
+		opp_card.scale = Vector2(opp_scale, opp_scale)
 		opp_card.z_index = 0
 		opp_card.card_slot_is_in = available_slot
 		opp_card.get_node("Area2D/CollisionShape2D").disabled = true

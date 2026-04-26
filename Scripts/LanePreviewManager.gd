@@ -116,7 +116,8 @@ func _show_lane_page(lane_id: String) -> void:
 
 
 func _show_card_page(card_id: String) -> void:
-	var card_scene: PackedScene = load("res://Scenes/Card.tscn")
+	var card_data: Dictionary = CardDatabase.CARDS.get(card_id, {})
+	var card_scene: PackedScene = CardDatabase.get_card_scene(card_data)
 	var preview := card_scene.instantiate()
 
 	preview.scale = Vector2(CARD_PREVIEW_SCALE, CARD_PREVIEW_SCALE)
@@ -137,7 +138,6 @@ func _show_card_page(card_id: String) -> void:
 	if card_back:
 		card_back.visible = false
 
-	var card_data: Dictionary = CardDatabase.CARDS.get(card_id, {})
 	if not card_data.is_empty():
 		CardDatabase.populate_card_visuals(preview, card_data)
 
