@@ -10,6 +10,7 @@ var owner_player_id: int = -1  # Which player owns this card (0 = top, 1 = botto
 var power_modifier: int = 0  # Runtime power buff/debuff applied to base power
 var _display_card_id: String = ""  # Visual-only id used while a level-up is queued but not yet animating
 var aura_power_modifier: int = 0  # Aura-based power buff/debuff (recalculated when board changes, not permanent)
+var aura_cost_modifier: int = 0   # Aura-based cost reduction for hand cards (reset + reapplied with every aura recalc)
 var cost_modifier: int = 0  # Runtime cost adjustment (negative = cheaper, positive = more expensive)
 var is_resolved: bool = false  # True once this card has been flipped/revealed during resolve
 var is_in_hand: bool = false   # True while this card is in the local player's hand
@@ -126,11 +127,11 @@ func get_current_power() -> int:
 
 
 func get_current_cost() -> int:
-	"""Returns the card's current cost (base + modifier), clamped to minimum 0."""
+	"""Returns the card's current cost (base + modifier + aura cost modifier), clamped to minimum 0."""
 	var card_data = CardDatabase.CARDS.get(card_id)
 	if not card_data:
 		return 0
-	return max(0, int(card_data.get("Cost", 0)) + cost_modifier)
+	return max(0, int(card_data.get("Cost", 0)) + cost_modifier + aura_cost_modifier)
 
 
 func get_total_power_modifier() -> int:
@@ -238,6 +239,20 @@ func on_death_prevented() -> void:
 				name_str, buff_amount, get_current_power()])
 
 
+func _apply_level_up_silently(new_card_id: String) -> void:
+	"""Upgrade this card to new_card_id with no animation.
+	Used for secondary board copies when another copy has already played the full level-up
+	animation for this champion."""
+	var new_data = CardDatabase.CARDS.get(new_card_id)
+	if not new_data:
+		return
+	card_id = new_card_id
+	_display_card_id = ""
+	CardDatabase.populate_card_visuals(self, new_data, self)
+	_refresh_keyword_display()
+	print("[GLOBAL_LEVELUP] board card silently upgraded to %s" % new_card_id)
+
+
 func _perform_level_up(new_card_id: String) -> void:
 	"""Transform this card in-place into a different card (level up).
 	Plays a fly-to-center → spin → fly-back animation sequence, then
@@ -252,9 +267,25 @@ func _perform_level_up(new_card_id: String) -> void:
 
 	var old_id = card_id
 	var old_name = CardDatabase.CARDS.get(card_id, {}).get("Name", card_id)
+	var champ_name: String = new_data.get("Name", "")
+	var is_local_card: bool = _card_manager != null \
+			and owner_player_id == _card_manager.current_player_id
+
+	# For locally-owned cards: if another copy of this champion already played the full
+	# level-up animation this match, upgrade this copy silently instead.
+	if is_local_card and champ_name != "" \
+			and _card_manager.permanently_leveled_up.get(champ_name, "") == new_card_id:
+		_apply_level_up_silently(new_card_id)
+		AbilityResolver.execute_level_up_ability(self)
+		return
 
 	# Update identity immediately so callers reading card_id see the new value
 	card_id = new_card_id
+
+	# Register globally RIGHT NOW (before any await) so any other copy of this champion
+	# checked in the same frame sees the flag and skips its full animation.
+	if is_local_card and champ_name != "":
+		_card_manager.permanently_leveled_up[champ_name] = new_card_id
 
 	# Freeze the visual display at the currently-visible level while this level-up
 	# waits in the animation queue. Prevents AuraSystem label refreshes and other
@@ -263,12 +294,12 @@ func _perform_level_up(new_card_id: String) -> void:
 		_display_card_id = old_id
 
 	# Notify opponent: only broadcast for locally-owned cards to prevent echo
-	if _card_manager and _card_manager._is_online() \
-			and owner_player_id == _card_manager.current_player_id:
+	if is_local_card and _card_manager._is_online():
 		_card_manager.rpc("_receive_opponent_level_up", old_id, new_card_id)
 
-	# ── 0. Acquire global level-up lock ──────────────────────────────────
+	# ── 0. Register as pending, then acquire global level-up lock ────────
 	if _card_manager:
+		_card_manager._level_up_pending += 1
 		while _card_manager._level_up_in_progress:
 			await get_tree().create_timer(0.05).timeout
 		_card_manager._level_up_in_progress = true
@@ -322,16 +353,24 @@ func _perform_level_up(new_card_id: String) -> void:
 	# ── 6. Brief settle pause (0.5 sec) ──────────────────────────────────
 	await get_tree().create_timer(0.5).timeout
 
-	# ── 7. Release global level-up lock ──────────────────────────────────
+	# ── 7. Release global level-up lock and decrement pending count ──────
 	if _card_manager:
 		_card_manager._level_up_in_progress = false
+		_card_manager._level_up_pending -= 1
 	_display_card_id = ""  # clear: card_id is now the final value, no override needed
 
 	var new_name = new_data.get("Name", new_card_id)
 	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
 		old_name, old_name, old_id, new_name, new_card_id])
 
-	# ── 8. Fire "When I level up" ability ────────────────────────────────
+	# ── 8. Upgrade all remaining copies (hand, deck, other board cards) ──────────
+	# Only for locally-owned cards; opponent copies are synced via RPC inside
+	# upgrade_all_copies. This fires AFTER the animation so the opponent sees the
+	# primary animation complete before receiving the global upgrade notice.
+	if is_local_card and _card_manager:
+		_card_manager.upgrade_all_copies(old_id, new_card_id)
+
+	# ── 9. Fire "When I level up" ability ────────────────────────────────
 	AbilityResolver.execute_level_up_ability(self)
 
 

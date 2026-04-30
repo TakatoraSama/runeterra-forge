@@ -29,9 +29,9 @@ glow_enabled = true
 script = ExtResource("1_rgh2o")
 
 [node name="TurnText" type="RichTextLabel" parent="CardManager" unique_id=2073115533]
-offset_left = 1430.0
+offset_left = 1480.0
 offset_top = 685.0
-offset_right = 1630.0
+offset_right = 1680.0
 offset_bottom = 735.0
 theme_override_font_sizes/normal_font_size = 32
 text = "Turn 0"
@@ -40,9 +40,9 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="ManaText" type="RichTextLabel" parent="CardManager" unique_id=1164499524]
-offset_left = 290.0
+offset_left = 240.0
 offset_top = 685.0
-offset_right = 490.0
+offset_right = 440.0
 offset_bottom = 735.0
 theme_override_font_sizes/normal_font_size = 28
 text = "Mana"
@@ -67,6 +67,13 @@ offset_top = 925.0
 offset_right = 1845.0
 offset_bottom = 975.0
 text = "End Turn"
+
+[node name="Undo" type="Button" parent="CardManager" unique_id=1844857358]
+offset_left = 1695.0
+offset_top = 860.0
+offset_right = 1845.0
+offset_bottom = 910.0
+text = "Undo Actions"
 
 [node name="GameManager" type="Node2D" parent="." unique_id=1734828372]
 script = ExtResource("8_50glp")

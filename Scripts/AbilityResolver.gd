@@ -98,6 +98,18 @@ func execute_play_ability(card: Node) -> void:
 			await _ability_spinning_axe(card)
 		"create_multiple_cards":
 			_ability_create_multiple_cards(card)
+		"janna_updraft_draw":
+			await _ability_janna_updraft_draw(card)
+		"janna_draw_cost_reduce":
+			await _ability_janna_draw_cost_reduce(card)
+		"sea_scarab_draw_discard":
+			await _ability_sea_scarab_draw_discard(card)
+		"abyssal_eye_draw":
+			await _ability_abyssal_eye_draw(card)
+		"devourer_deep_kill_enemy":
+			await _ability_devourer_deep_kill_enemy(card)
+		"mordekaiser_play_kill":
+			await _ability_mordekaiser_play_kill(card)
 		_:
 			pass  # no Play ability or unhandled type
 
@@ -114,6 +126,8 @@ func execute_level_up_ability(card: Node) -> void:
 	match ability_type:
 		"level_up_create_from_discards":
 			_ability_level_up_create_from_discards(card)
+		"nautilus_levelup_create_sea_monsters":
+			_ability_nautilus_levelup_create_sea_monsters(card)
 		_:
 			pass  # no level-up ability or unhandled type
 
@@ -139,6 +153,8 @@ func execute_round_start_ability(card: Node) -> bool:
 			_ability_create_card_if_not_in_hand(card)
 		"create_multiple_cards":
 			_ability_create_multiple_cards(card)
+		"janna_draw_cost_reduce":
+			await _ability_janna_draw_cost_reduce(card)
 		_:
 			pass
 	return true
@@ -161,6 +177,12 @@ func execute_round_end_ability(card: Node) -> bool:
 	match ability_type:
 		"kill_ally_buff":
 			await _ability_kill_ally_buff(card)
+		"megatusk_deep_buff_lane":
+			_ability_megatusk_deep_buff_lane(card)
+		"terror_debuff_lane_enemies":
+			_ability_terror_debuff_lane_enemies(card)
+		"mordekaiser_round_end_purge":
+			await _ability_mordekaiser_round_end_purge(card)
 		_:
 			pass
 	return true
@@ -842,6 +864,53 @@ func _ability_level_up_create_from_discards(card: Node) -> void:
 		card_name, created_count, owner_discards.size()])
 
 
+func _ability_nautilus_levelup_create_sea_monsters(card: Node) -> void:
+	"""Nautilus2 {When I level up}: create {created_count} random Sea Monster cards in hand.
+	Picks from all CardDatabase entries with SubType 'Sea Monster' and Cost >= created_cost,
+	without replacement (no duplicate card IDs in the same batch).
+	Only runs on the owner's client (owner_player_id == current_player_id)."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var nautilus_data = CardDatabase.CARDS.get(card.card_id)
+	if not nautilus_data:
+		return
+
+	var balance: Dictionary = nautilus_data.get("BalanceValues", {})
+	var created_cost: int   = int(balance.get("created_cost", 3))
+	var created_count: int  = int(balance.get("created_count", 3))
+
+	# Build pool: all Sea Monster cards with base Cost >= created_cost
+	var pool: Array = []
+	for cid in CardDatabase.CARDS:
+		var cd = CardDatabase.CARDS[cid]
+		if cd.get("SubType", "") == "Sea Monster" and int(cd.get("Cost", 0)) >= created_cost:
+			pool.append(cid)
+
+	if pool.is_empty():
+		print("Nautilus2 level-up: no Sea Monster cards found with cost >= %d" % created_cost)
+		return
+
+	# Shuffle then take up to created_count (no duplicates — each card ID appears once)
+	var shuffled: Array = pool.duplicate()
+	for i in range(shuffled.size() - 1, 0, -1):
+		var j: int = _local_rng.randi() % (i + 1)
+		var tmp = shuffled[i]
+		shuffled[i] = shuffled[j]
+		shuffled[j] = tmp
+	var picks: Array = shuffled.slice(0, mini(created_count, shuffled.size()))
+
+	var card_name: String = nautilus_data.get("Name", "Nautilus")
+	for picked_id in picks:
+		cm.create_card_in_hand(picked_id, card.card_id, card.owner_player_id)
+		var picked_name: String = CardDatabase.CARDS.get(picked_id, {}).get("Name", picked_id)
+		print("%s level-up: created [%s] in hand" % [card_name, picked_name])
+	print("%s level-up: created %d Sea Monster(s) in hand" % [card_name, picks.size()])
+
+
 # ─── Round Start abilities ─────────────────────────────────────────────────────
 
 func _ability_conditional_buff(card: Node) -> void:
@@ -919,6 +988,7 @@ func _ability_kill_ally_buff(card: Node) -> void:
 	var card_data   = CardDatabase.CARDS.get(card.card_id)
 	var buff_amount: int = int(card_data.get("BalanceValues", {}).get("kill_power", 2)) if card_data else 2
 	var killed_card_id   = weakest_card.card_id
+	var killed_owner_id: int = weakest_card.owner_player_id
 	var kill_succeeded   := false
 
 	if weakest_card.has_method("can_prevent_death") and weakest_card.can_prevent_death():
@@ -947,6 +1017,10 @@ func _ability_kill_ally_buff(card: Node) -> void:
 		if killed_data and killed_data.get("AbilityType", "") == "last_breath_create":
 			await execute_last_breath_ability(weakest_card)
 		weakest_card.queue_free()
+		# Mordekaiser passive: revive this ally at its original zone if Mord is in play.
+		# Drain any level-up triggered by this kill before the revive animation starts.
+		await cm._wait_for_level_up()
+		await _try_mordekaiser_revive_passive(zone_key, killed_card_id, killed_owner_id)
 
 	# 'and' — buff ALWAYS applies regardless of whether the kill succeeded
 	card.power_modifier += buff_amount
@@ -1583,6 +1657,681 @@ func _receive_opponent_irelia_blade_summon(zone_col: int, zone_row: int,
 	cm._notify_zone_power_changed()
 
 	print("Irelia blade RPC received: Blade at zone %s" % str(zone_key))
+
+
+# ─── Updraft + Janna abilities ─────────────────────────────────────────────────
+
+func _ability_updraft(owner_card: Node, count: int) -> int:
+	"""Shuffle the `count` oldest hand cards into random deck positions, each reduced by 1 cost.
+	Returns the actual number of cards shuffled. Owner-gated (local player only)."""
+	if owner_card.owner_player_id != 1:
+		return 0
+	var cm = get_node_or_null("/root/Main/CardManager")
+	var player_hand = get_node_or_null("/root/Main/PlayerHand")
+	var deck = get_node_or_null("/root/Main/Deck")
+	if not cm or not player_hand or not deck:
+		return 0
+	var hand: Array = player_hand.player_hand  # index 0 = newest, last index = oldest
+	var take: int = mini(count, hand.size())
+	if take == 0:
+		return 0
+	var cards_to_updraft: Array = []
+	for i in range(hand.size() - take, hand.size()):
+		cards_to_updraft.append(hand[i])
+
+	# Reduce cost first so player can see it before the shuffle
+	cm.adjust_cost(cards_to_updraft, -1)
+	await get_tree().create_timer(0.8).timeout
+
+	# Shuffle each card back into deck at a random position with cost_mod preserved
+	for updraft_card in cards_to_updraft:
+		var entry = {"id": updraft_card.card_id, "cost_mod": updraft_card.cost_modifier}
+		player_hand.remove_card_from_hand(updraft_card)
+		var insert_pos: int = _local_rng.randi_range(0, deck.player_deck.size())
+		deck.player_deck.insert(insert_pos, entry)
+		updraft_card.queue_free()
+	deck.get_node("RichTextLabel").text = str(deck.player_deck.size())
+	return take
+
+
+func _ability_janna_updraft_draw(card: Node) -> void:
+	"""Janna1 Play: Updraft updraft_threshold oldest hand cards, then draw that many."""
+	if card.owner_player_id != 1:
+		return
+	var balance: Dictionary = CardDatabase.CARDS[card.card_id].get("BalanceValues", {})
+	var updraft_threshold: int = int(balance.get("updraft_threshold", 2))
+	var deck = get_node_or_null("/root/Main/Deck")
+	if not deck:
+		return
+	var actual_count: int = await _ability_updraft(card, updraft_threshold)
+	if actual_count > 0:
+		deck.draw_cards(actual_count)
+		await LevelUpManager.check_level_ups_after_draw()
+
+
+func _ability_janna_draw_cost_reduce(card: Node) -> void:
+	"""Janna2 Play/Round Start: Draw draw_threshold cards and reduce each drawn card's cost."""
+	if card.owner_player_id != 1:
+		return
+	var balance: Dictionary = CardDatabase.CARDS[card.card_id].get("BalanceValues", {})
+	var draw_threshold: int = int(balance.get("draw_threshold", 1))
+	var cost_reduction: int = int(balance.get("cost_reduction", 1))
+	var cm = get_node_or_null("/root/Main/CardManager")
+	var player_hand = get_node_or_null("/root/Main/PlayerHand")
+	var deck = get_node_or_null("/root/Main/Deck")
+	if not cm or not player_hand or not deck:
+		return
+	# Snapshot hand before draw to identify newly drawn cards
+	var hand_before: Array = player_hand.player_hand.duplicate()
+	deck.draw_cards(draw_threshold)
+	var new_cards: Array = []
+	for hand_card in player_hand.player_hand:
+		if hand_card not in hand_before:
+			new_cards.append(hand_card)
+	if not new_cards.is_empty():
+		cm.adjust_cost(new_cards, -cost_reduction)
+	await LevelUpManager.check_level_ups_after_draw()
+
+
+# ─── Sea Monster abilities ─────────────────────────────────────────────────────
+
+func _ability_sea_scarab_draw_discard(card: Node) -> void:
+	"""Sea Scarab {Play}: Draw a random non-champion card from deck, then immediately discard it."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var deck = get_node_or_null("/root/Main/Deck")
+	var player_hand = get_node_or_null("/root/Main/PlayerHand")
+	if not deck or not player_hand:
+		return
+
+	# Find all non-champion entries still in deck
+	var non_champ_entries: Array = []
+	for entry in deck.player_deck:
+		var cd = CardDatabase.CARDS.get(entry["id"])
+		if cd and cd.get("Type", "") != "Champion":
+			non_champ_entries.append(entry)
+
+	if non_champ_entries.is_empty():
+		print("Sea Scarab {Play}: no non-champion cards in deck, skipping")
+		return
+
+	var picked_entry = non_champ_entries[_local_rng.randi() % non_champ_entries.size()]
+	var picked_id: String = picked_entry["id"]
+
+	# Snapshot hand, draw specific card, then identify and discard it
+	var hand_before: Array = player_hand.player_hand.duplicate()
+	deck.draw_specific_cards([picked_id])
+
+	var drawn_card = null
+	for hand_card in player_hand.player_hand:
+		if hand_card not in hand_before and hand_card.card_id == picked_id:
+			drawn_card = hand_card
+			break
+
+	if drawn_card == null:
+		print("Sea Scarab {Play}: could not find drawn card in hand")
+		return
+
+	await cm.discard_card_from_hand(drawn_card, card.card_id)
+	print("Sea Scarab {Play}: drew and discarded [%s]" % picked_id)
+	await LevelUpManager.check_level_ups_after_draw()
+
+
+func _ability_abyssal_eye_draw(card: Node) -> void:
+	"""Abyssal Eye {Play}: Draw draw_count cards."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var deck = get_node_or_null("/root/Main/Deck")
+	if not deck:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	var draw_count: int = int(card_data.get("BalanceValues", {}).get("draw_count", 1)) if card_data else 1
+	deck.draw_cards(draw_count)
+	await LevelUpManager.check_level_ups_after_draw()
+
+
+func _ability_devourer_deep_kill_enemy(card: Node) -> void:
+	"""Devourer of the Depths {Play}: If owner is Deep, kill a random enemy in this lane
+	that has strictly less Power than Devourer."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var owner_id: int = card.owner_player_id
+	if not cm.player_state.get(owner_id, {}).get("is_deep", false):
+		print("Devourer of the Depths {Play}: owner is not Deep, skipping")
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var my_power: int = card.get_current_power()
+	var enemy_zone: Vector2i = board.get_opposing_zone(zone_key)
+	var valid_targets: Array = []
+
+	for enemy in board.get_cards_in_zone(enemy_zone):
+		if not is_instance_valid(enemy) or not enemy.is_resolved:
+			continue
+		var target_data = CardDatabase.CARDS.get(enemy.card_id)
+		if not target_data:
+			continue
+		var target_type: String = target_data.get("Type", "")
+		if target_type != "Champion" and target_type != "Follower":
+			continue
+		if enemy.get_current_power() < my_power:
+			valid_targets.append(enemy)
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	if valid_targets.is_empty():
+		print("%s {Play}: no valid targets (no enemy has less Power than %d)" % [my_name, my_power])
+		return
+
+	var target = pick_random_target(valid_targets)
+	if target == null:
+		return
+	var target_data = CardDatabase.CARDS.get(target.card_id)
+	var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
+	var target_power: int = target.get_current_power()
+
+	# Death prevention check
+	if target.has_method("can_prevent_death") and target.can_prevent_death():
+		await card.get_tree().create_timer(0.5).timeout
+		target.on_death_prevented()
+		print("%s {Play}: tried to kill %s, but death was prevented!" % [my_name, target_name])
+		return
+
+	# Kill animation
+	var killed_anim = target.get_node_or_null("AnimationPlayer")
+	if killed_anim and killed_anim.has_animation("card_killed"):
+		killed_anim.play("card_killed")
+		await killed_anim.animation_finished
+	else:
+		await card.get_tree().create_timer(0.5).timeout
+
+	cm.track_killed_card(target, card.owner_player_id, card.card_id)
+
+	if target.card_slot_is_in:
+		target.card_slot_is_in.card_in_slot = false
+	board.remove_card_from_zone(enemy_zone, target)
+	board.reposition_cards_in_zone(enemy_zone)
+	target.card_slot_is_in = null
+	var killed_data = CardDatabase.CARDS.get(target.card_id)
+	if killed_data and killed_data.get("AbilityType", "") == "last_breath_create":
+		await execute_last_breath_ability(target)
+	target.queue_free()
+
+	print("%s {Play}: killed %s (Power %d)" % [my_name, target_name, target_power])
+	cm._notify_zone_power_changed()
+
+
+func _ability_megatusk_deep_buff_lane(card: Node) -> void:
+	"""Megatusk {Round End}: If owner is Deep, grant all allied Champions/Followers here +power_bonus Power."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+
+	var owner_id: int = card.owner_player_id
+	if not cm.player_state.get(owner_id, {}).get("is_deep", false):
+		print("Megatusk {Round End}: owner is not Deep, skipping")
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var power_bonus: int = int(card_data.get("BalanceValues", {}).get("power_bonus", 1))
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var buffed_count := 0
+	for ally in board.get_cards_in_zone(zone_key):
+		if not is_instance_valid(ally) or not ally.is_resolved:
+			continue
+		var ally_data = CardDatabase.CARDS.get(ally.card_id)
+		if not ally_data:
+			continue
+		var ally_type: String = ally_data.get("Type", "")
+		if ally_type != "Champion" and ally_type != "Follower":
+			continue
+		ally.power_modifier += power_bonus
+		var power_label = ally.get_node_or_null("CardFront/Power")
+		if power_label:
+			power_label.text = ally.get_power_display_text()
+		buffed_count += 1
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	print("%s {Round End}: granted +%d Power to %d allies (owner is Deep)" % [my_name, power_bonus, buffed_count])
+	cm._notify_zone_power_changed()
+
+
+func _ability_terror_debuff_lane_enemies(card: Node) -> void:
+	"""Terror of the Tides {Round End}: Grant all enemy Champions/Followers here -power_reduction Power."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var power_reduction: int = int(card_data.get("BalanceValues", {}).get("power_reduction", 1))
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var enemy_zone: Vector2i = board.get_opposing_zone(zone_key)
+	var debuffed_count := 0
+
+	for enemy in board.get_cards_in_zone(enemy_zone):
+		if not is_instance_valid(enemy) or not enemy.is_resolved:
+			continue
+		var enemy_data = CardDatabase.CARDS.get(enemy.card_id)
+		if not enemy_data:
+			continue
+		var enemy_type: String = enemy_data.get("Type", "")
+		if enemy_type != "Champion" and enemy_type != "Follower":
+			continue
+		enemy.power_modifier -= power_reduction
+		var power_label = enemy.get_node_or_null("CardFront/Power")
+		if power_label:
+			power_label.text = enemy.get_power_display_text()
+		debuffed_count += 1
+
+	var my_name: String = card_data.get("Name", card.card_id)
+	print("%s {Round End}: applied -%d Power to %d enemies" % [my_name, power_reduction, debuffed_count])
+	cm._notify_zone_power_changed()
+
+
+# ─── Mordekaiser abilities ─────────────────────────────────────────────────────
+
+func _try_mordekaiser_revive_passive(zone_key: Vector2i, killed_card_id: String, killed_owner_id: int) -> void:
+	"""Passive revive triggered whenever an ally dies while Mordekaiser is in play.
+	Scans the entire board for any Mordekaiser owned by killed_owner_id — not just
+	the zone where the card died, so Mord in lane A revives allies that die in lane B.
+	If Mord is found and the original zone has room, the dead card is recreated there.
+	Marks the most-recent matching killed_cards entry as is_revived = true."""
+	var cm    := _get_card_manager()
+	var board := _get_board()
+	if not cm or not board:
+		return
+	# Only handle local player's allies
+	if killed_owner_id != cm.current_player_id:
+		return
+	# zone_key must be a real board zone
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	# Wait for any in-progress level-up animation (e.g. triggered by the kill that prompted this
+	# revive) before placing the revived card, so animations don't overlap.
+	await cm._wait_for_level_up()
+
+	var _gm = cm.game_manager_reference
+	var _phase_str = str(_gm.round_phase) if _gm else "?"
+	print("[MORD_REVIVE] passive called: card=%s zone=%s phase=%s" % [killed_card_id, str(zone_key), _phase_str])
+
+	# Check if any Mordekaiser (either level) owned by this player is currently on the board
+	var mord_in_play := false
+	for candidate in cm.all_cards_in_play_order:
+		if not is_instance_valid(candidate) or not candidate.is_resolved:
+			continue
+		if not candidate.card_slot_is_in:
+			continue
+		if candidate.owner_player_id != killed_owner_id:
+			continue
+		var cd = CardDatabase.CARDS.get(candidate.card_id)
+		if cd and cd.get("Name", "") == "Mordekaiser":
+			mord_in_play = true
+			break
+
+	if not mord_in_play:
+		print("[MORD_REVIVE] no Mordekaiser on board — skip")
+		return
+
+	# Check zone has room (slots_by_zone exists on board)
+	var zone_slots: Array = board.slots_by_zone.get(zone_key, [])
+	var zone_cards: Array = board.get_cards_in_zone(zone_key)
+	if zone_cards.size() >= zone_slots.size():
+		print("Mordekaiser revive: zone %s is full (%d/%d), skipping" % [str(zone_key), zone_cards.size(), zone_slots.size()])
+		return
+
+	# Mark the most-recent unrevived killed_cards entry for this card as revived
+	for i in range(cm.killed_cards.size() - 1, -1, -1):
+		var entry = cm.killed_cards[i]
+		if entry.get("card_id", "") == killed_card_id \
+				and int(entry.get("owner_player_id", -1)) == killed_owner_id \
+				and not entry.get("is_revived", false):
+			cm.killed_cards[i]["is_revived"] = true
+			break
+
+	# Instantiate revived card and place it on the board
+	var revived_data = CardDatabase.CARDS.get(killed_card_id)
+	if not revived_data:
+		print("Mordekaiser revive: no CardDatabase entry for %s, aborting" % killed_card_id)
+		return
+	var card_scene = CardDatabase.get_card_scene(revived_data)
+	if not card_scene:
+		print("Mordekaiser revive: could not load scene for %s, aborting" % killed_card_id)
+		return
+	var new_card = card_scene.instantiate()
+	if new_card.get_script() == null:
+		new_card.set_script(CardDatabase.get_card_script(revived_data))
+
+	new_card.card_id = killed_card_id
+	new_card.owner_player_id = killed_owner_id
+	new_card.is_resolved = true
+	CardDatabase.populate_card_visuals(new_card, revived_data)
+	cm.add_child(new_card)
+	new_card.name = "Card"
+	new_card.scale = Vector2(cm.CARD_SMALLER_SCALE, cm.CARD_SMALLER_SCALE)
+
+	board.add_card_to_zone(zone_key, new_card)
+	board.reposition_cards_in_zone(zone_key)
+	cm.add_card_to_play_order(new_card)
+
+	# Send revive RPC before track_summoned_card: track_summoned_card calls
+	# _check_sion_levelup() which fires a level-up RPC. Reliable RPCs are ordered,
+	# so opponent receives revive before level-up.
+	print("[MORD_REVIVE] card instantiated, sending RPC (online=%s)" % str(_is_online()))
+	if _is_online():
+		var mirrored_zone := Vector2i(zone_key.x, 1 - zone_key.y)
+		cm.rpc("_receive_opponent_mord_revive", killed_card_id, mirrored_zone.x, mirrored_zone.y)
+
+	cm.track_summoned_card(new_card, false)
+
+	# Await the animation so it fully completes before the loop can re-target this card
+	var anim = new_card.get_node_or_null("AnimationPlayer")
+	var has_anim: bool = anim != null and anim.has_animation("card_flip")
+	print("[MORD_REVIVE] starting animation (has_card_flip=%s)" % str(has_anim))
+	if has_anim:
+		anim.play("card_flip")
+		await anim.animation_finished
+	else:
+		await new_card.get_tree().create_timer(0.5).timeout
+	print("[MORD_REVIVE] animation done, running level-up checks")
+
+	# Recalculate auras and zone power labels.
+	cm._notify_zone_power_changed()
+	# Run the full level-up check suite so any champion whose condition was satisfied by the
+	# revived card joining the board (e.g. Azir summoning counter) fires its level-up and
+	# sends the corresponding RPC to the opponent.  The two waits bracket the check: the first
+	# drains any level-up that track_summoned_card already started; the second drains any new
+	# level-up that check_level_ups_after_abilities just triggered.
+	await cm._wait_for_level_up()
+	await LevelUpManager.check_level_ups_after_abilities()
+	await cm._wait_for_level_up()
+	var revived_name: String = revived_data.get("Name", killed_card_id)
+	print("[MORD_REVIVE] complete: [%s] revived in zone %s" % [revived_name, str(zone_key)])
+
+
+func _ability_mordekaiser_play_kill(card: Node) -> void:
+	"""Mordekaiser1 {Play}: Kill play_kill_count random allied Champions/Followers in this lane.
+	Each death also triggers the revive passive (Mord is already in play at this point)."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+	if card.owner_player_id != cm.current_player_id:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var zone_key: Vector2i = board.get_zone_for_slot(card.card_slot_is_in)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var kill_count: int = int(card_data.get("BalanceValues", {}).get("play_kill_count", 2))
+	var my_name: String = card_data.get("Name", card.card_id)
+	print("[MORD_PLAY_KILL] starting: kill_count=%d zone=%s" % [kill_count, str(zone_key)])
+
+	for _i in range(kill_count):
+		print("[MORD_PLAY_KILL] iteration %d: snapshotting targets" % _i)
+		# Snapshot valid targets each iteration — zone changes after each kill+revive
+		var valid_targets: Array = []
+		for ally in board.get_cards_in_zone(zone_key):
+			if ally == card or not is_instance_valid(ally) or not ally.is_resolved:
+				continue
+			var ally_data = CardDatabase.CARDS.get(ally.card_id)
+			if not ally_data:
+				continue
+			# Never target another Mordekaiser — prevents infinite kill/revive loops
+			if ally_data.get("Name", "") == "Mordekaiser":
+				continue
+			var ally_type: String = ally_data.get("Type", "")
+			if ally_type != "Champion" and ally_type != "Follower":
+				continue
+			valid_targets.append(ally)
+
+		if valid_targets.is_empty():
+			print("%s {Play}: no more valid allies to kill (killed %d so far)" % [my_name, _i])
+			break
+
+		var target = pick_random_target(valid_targets)
+		if target == null:
+			break
+
+		var target_data = CardDatabase.CARDS.get(target.card_id)
+		var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
+		var target_card_id: String = target.card_id
+		var target_owner_id: int = target.owner_player_id
+		print("[MORD_PLAY_KILL] iteration %d: selected target=%s (is_resolved=%s)" % [_i, target_name, str(target.is_resolved)])
+
+		# Death prevention check
+		if target.has_method("can_prevent_death") and target.can_prevent_death():
+			await card.get_tree().create_timer(0.5).timeout
+			target.on_death_prevented()
+			print("%s {Play}: tried to kill %s, but death was prevented!" % [my_name, target_name])
+			continue
+
+		# Kill animation
+		var killed_anim = target.get_node_or_null("AnimationPlayer")
+		if killed_anim and killed_anim.has_animation("card_killed"):
+			killed_anim.play("card_killed")
+			await killed_anim.animation_finished
+		else:
+			await card.get_tree().create_timer(0.5).timeout
+
+		cm.track_killed_card(target, card.owner_player_id, card.card_id)
+
+		if target.card_slot_is_in:
+			target.card_slot_is_in.card_in_slot = false
+		board.remove_card_from_zone(zone_key, target)
+		board.reposition_cards_in_zone(zone_key)
+		target.card_slot_is_in = null
+		var target_killed_data = CardDatabase.CARDS.get(target.card_id)
+		if target_killed_data and target_killed_data.get("AbilityType", "") == "last_breath_create":
+			await execute_last_breath_ability(target)
+		target.queue_free()
+		print("%s {Play}: killed %s" % [my_name, target_name])
+		# Multiplayer: notify opponent to remove the killed ally from their view
+		if _is_online():
+			var mirrored_zone := Vector2i(zone_key.x, 1 - zone_key.y)
+			cm.rpc("_receive_opponent_mord_kill", target_card_id, mirrored_zone.x, mirrored_zone.y)
+
+		# Mordekaiser passive — revive the card back to this zone.
+		# Wait for any level-up the kill may have triggered (e.g. Mord's own level-up from
+		# track_killed_card) before starting the revive animation.
+		await cm._wait_for_level_up()
+		print("[MORD_PLAY_KILL] iteration %d: calling revive passive for %s" % [_i, target_card_id])
+		await _try_mordekaiser_revive_passive(zone_key, target_card_id, target_owner_id)
+		print("[MORD_PLAY_KILL] iteration %d: revive passive returned" % _i)
+
+	print("[MORD_PLAY_KILL] loop complete")
+	cm._notify_zone_power_changed()
+
+
+func _ability_mordekaiser_round_end_purge(card: Node) -> void:
+	"""Mordekaiser2 {Round End}: Kill ALL Champions/Followers in this lane except Mordekaiser
+	himself and the weakest enemy. Mord's passive then revives all killed allies."""
+	var board := _get_board()
+	var cm    := _get_card_manager()
+	if not board or not cm or not card.card_slot_is_in:
+		return
+
+	var card_data = CardDatabase.CARDS.get(card.card_id)
+	if not card_data:
+		return
+
+	var zone_key: Vector2i  = board.get_zone_for_slot(card.card_slot_is_in)
+	var enemy_zone: Vector2i = board.get_opposing_zone(zone_key)
+	if zone_key == Vector2i(-1, -1):
+		return
+
+	var my_name: String = card_data.get("Name", card.card_id)
+
+	# ── Find weakest enemy (Champion/Follower) to spare ──────────────────────
+	var weakest_enemy = null
+	var weakest_power: float = INF
+	for enemy in board.get_cards_in_zone(enemy_zone):
+		if not is_instance_valid(enemy) or not enemy.is_resolved:
+			continue
+		var ed = CardDatabase.CARDS.get(enemy.card_id)
+		if not ed:
+			continue
+		var et: String = ed.get("Type", "")
+		if et != "Champion" and et != "Follower":
+			continue
+		var ep: float = enemy.get_current_power() if enemy.has_method("get_current_power") else 0.0
+		if ep < weakest_power:
+			weakest_power = ep
+			weakest_enemy = enemy
+
+	# ── Snapshot allies and non-weakest enemies to kill ───────────────────────
+	var allies_to_kill: Array = []
+	for ally in board.get_cards_in_zone(zone_key):
+		if ally == card or not is_instance_valid(ally) or not ally.is_resolved:
+			continue
+		var ad = CardDatabase.CARDS.get(ally.card_id)
+		if not ad:
+			continue
+		var at: String = ad.get("Type", "")
+		if at != "Champion" and at != "Follower":
+			continue
+		allies_to_kill.append(ally)
+
+	var enemies_to_kill: Array = []
+	for enemy in board.get_cards_in_zone(enemy_zone):
+		if enemy == weakest_enemy or not is_instance_valid(enemy) or not enemy.is_resolved:
+			continue
+		var ed = CardDatabase.CARDS.get(enemy.card_id)
+		if not ed:
+			continue
+		var et: String = ed.get("Type", "")
+		if et != "Champion" and et != "Follower":
+			continue
+		enemies_to_kill.append(enemy)
+
+	# ── Kill enemies first (no revive passive for enemies) ────────────────────
+	for target in enemies_to_kill:
+		if not is_instance_valid(target):
+			continue
+		var target_data = CardDatabase.CARDS.get(target.card_id)
+		var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
+		var enemy_card_id: String = target.card_id  # capture before queue_free
+
+		if target.has_method("can_prevent_death") and target.can_prevent_death():
+			await card.get_tree().create_timer(0.5).timeout
+			target.on_death_prevented()
+			print("%s {Round End}: tried to kill enemy %s, death prevented!" % [my_name, target_name])
+			continue
+
+		var ea = target.get_node_or_null("AnimationPlayer")
+		if ea and ea.has_animation("card_killed"):
+			ea.play("card_killed")
+			await ea.animation_finished
+		else:
+			await card.get_tree().create_timer(0.5).timeout
+
+		cm.track_killed_card(target, card.owner_player_id, card.card_id)
+		if target.card_slot_is_in:
+			target.card_slot_is_in.card_in_slot = false
+		board.remove_card_from_zone(enemy_zone, target)
+		target.card_slot_is_in = null
+		var tkd = CardDatabase.CARDS.get(target.card_id)
+		if tkd and tkd.get("AbilityType", "") == "last_breath_create":
+			await execute_last_breath_ability(target)
+		target.queue_free()
+		print("%s {Round End}: killed enemy %s" % [my_name, target_name])
+		# Multiplayer: notify opponent to remove the killed card from their view
+		# enemy_zone is row 0 locally; opponent sees their own cards in row 1, so mirror
+		if _is_online():
+			var mirrored_zone := Vector2i(enemy_zone.x, 1 - enemy_zone.y)
+			cm.rpc("_receive_opponent_mord_kill", enemy_card_id, mirrored_zone.x, mirrored_zone.y)
+
+	board.reposition_cards_in_zone(enemy_zone)
+
+	# ── Kill allies; collect {card_id, owner_id} for batch revive ─────────────
+	var killed_ally_records: Array = []  # [{card_id, owner_id}]
+	for target in allies_to_kill:
+		if not is_instance_valid(target):
+			continue
+		var target_data = CardDatabase.CARDS.get(target.card_id)
+		var target_name: String = target_data.get("Name", target.card_id) if target_data else target.card_id
+		var target_card_id: String = target.card_id
+		var target_owner_id: int  = target.owner_player_id
+
+		if target.has_method("can_prevent_death") and target.can_prevent_death():
+			await card.get_tree().create_timer(0.5).timeout
+			target.on_death_prevented()
+			print("%s {Round End}: tried to kill ally %s, death prevented!" % [my_name, target_name])
+			continue
+
+		var aa = target.get_node_or_null("AnimationPlayer")
+		if aa and aa.has_animation("card_killed"):
+			aa.play("card_killed")
+			await aa.animation_finished
+		else:
+			await card.get_tree().create_timer(0.5).timeout
+
+		cm.track_killed_card(target, card.owner_player_id, card.card_id)
+		if target.card_slot_is_in:
+			target.card_slot_is_in.card_in_slot = false
+		board.remove_card_from_zone(zone_key, target)
+		target.card_slot_is_in = null
+		var akd = CardDatabase.CARDS.get(target.card_id)
+		if akd and akd.get("AbilityType", "") == "last_breath_create":
+			await execute_last_breath_ability(target)
+		target.queue_free()
+		killed_ally_records.append({"card_id": target_card_id, "owner_id": target_owner_id})
+		print("%s {Round End}: killed ally %s" % [my_name, target_name])
+		# Multiplayer: notify opponent to remove the killed ally from their view
+		# zone_key is row 1 locally (my side); opponent sees my cards in row 0
+		if _is_online():
+			var mirrored_zone := Vector2i(zone_key.x, 1 - zone_key.y)
+			cm.rpc("_receive_opponent_mord_kill", target_card_id, mirrored_zone.x, mirrored_zone.y)
+
+	board.reposition_cards_in_zone(zone_key)
+
+	# ── Batch revive all killed allies ────────────────────────────────────────
+	# Drain any level-up triggered by the mass kill before the first revive animation.
+	await cm._wait_for_level_up()
+	for rec in killed_ally_records:
+		await _try_mordekaiser_revive_passive(zone_key, rec["card_id"], rec["owner_id"])
+
+	cm._notify_zone_power_changed()
+	print("%s {Round End}: purge complete — killed %d allies, %d enemies; revive attempted for all allies" % [
+		my_name, killed_ally_records.size(), enemies_to_kill.size()])
 
 
 # ─── Shared helpers ────────────────────────────────────────────────────────────

@@ -75,6 +75,9 @@ func _draw_bot_cards(count: int) -> void:
 			break
 		_bot_hand.append(_bot_deck_remaining.pop_front())
 	print("BotManager: Drew %d card(s). Hand size: %d" % [count, _bot_hand.size()])
+	# Check Deep: if the bot's deck is now empty, mark player 0 as Deep
+	if _bot_deck_remaining.is_empty() and _card_manager and _card_manager.has_method("set_player_deep"):
+		_card_manager.set_player_deep(0)
 
 
 func _decide_bot_play() -> void:

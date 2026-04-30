@@ -237,9 +237,9 @@ func _activate_sunken_temple(col: int) -> void:
 			var card_to_shuffle = hand_cards[rand_idx]
 			if is_instance_valid(card_to_shuffle):
 				var shuffled_id: String = card_to_shuffle.card_id
-				# Add card ID back to deck (insert at random position for a shuffle feel)
+				# Add card back to deck as dict with preserved cost_mod (shuffle feel)
 				var insert_pos = randi() % (deck.player_deck.size() + 1)
-				deck.player_deck.insert(insert_pos, shuffled_id)
+				deck.player_deck.insert(insert_pos, {"id": shuffled_id, "cost_mod": card_to_shuffle.cost_modifier})
 				# Remove from hand and free the scene node
 				if player_hand.has_method("remove_card_from_hand"):
 					player_hand.remove_card_from_hand(card_to_shuffle)

@@ -19,6 +19,8 @@ var network_manager_reference
 var current_player_id: int = 1  # 0 = top player, 1 = bottom player (default)
 var flip_first_player_id: int = -1  # Synced from GameManager
 var played_cards_order: Array = []  # Cards played this turn only (cleared after resolve)
+var undo_stack: Array = []          # [{card, hand_index, mana_cost, zone_key, slot}] — cleared after resolve or undo
+var undo_button: Button
 var all_cards_in_play_order: Array = []  # Historical: all cards that ever entered the board (append-only, never removed)
 var opponent_played_cards: Array = []  # Cards opponent played (face-down until resolve)
 var _pending_opponent_cards: Array = []  # Deferred opponent card data [{card_id, zone_col, zone_row}]
@@ -27,8 +29,12 @@ var summoned_cards: Array = []  # Tracks all cards that entered the board [{card
 var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
 var recalled_cards: Array = []  # Tracks all recalls triggered by cards [{card_id, owner_player_id, recaller_player_id, recaller_card_id}]
 var discarded_cards: Array = []  # Tracks all cards discarded [{card_id, owner_player_id, discarded_by_card_id, discarded_at_turn}]
+var drawn_cards: Array = []  # Tracks all cards drawn from deck [{card_id, owner_player_id, turn}]
 var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
+var player_state: Dictionary = {}  # Per-player persistent state: {player_id: {"is_deep": bool, ...}}
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
+var _level_up_pending: int = 0           # Count of _perform_level_up calls still alive (waiting or animating)
+var permanently_leveled_up: Dictionary = {}  # champion Name → current highest card_id (e.g. "Azir" → "Azir2")
 var _card_resolve_done_signals: Dictionary = {}  # "ownerId_cardId" -> bool, for cross-client resolve sync
 var _is_swap_drag: bool = false           # True when dragging an Elusive board card for a lane swap
 var _swap_drag_origin_slot = null         # The slot the Elusive card came from
@@ -56,7 +62,7 @@ func _wait_for_level_up() -> void:
 	"""Suspend the current coroutine until any in-progress level-up animation finishes.
 	Call this after any ability or level-up check that may have started _perform_level_up
 	so the next card's ability doesn't fire while the animation is still playing."""
-	while _level_up_in_progress:
+	while _level_up_in_progress or _level_up_pending > 0:
 		await get_tree().create_timer(0.05).timeout
 
 
@@ -69,6 +75,14 @@ func _ready() -> void:
 	network_manager_reference = $"../NetworkManager"
 	$"../InputManager".connect("left_mouse_button_released", on_left_click_released)
 	game_manager_reference.mana_changed.connect(_on_mana_changed)
+	undo_button = $Undo
+	undo_button.pressed.connect(_on_undo_button_pressed)
+	undo_button.disabled = true
+	# Initialize per-player state (extensible: add new keys here as needed)
+	player_state = {
+		0: {"is_deep": false},
+		1: {"is_deep": false}
+	}
 
 func _on_mana_changed(player_id: int, current_mana: int, _max_mana: int) -> void:
 	if player_id != current_player_id:
@@ -250,6 +264,7 @@ func finish_drag():
 		card_being_dragged.scale = Vector2(place_scale, place_scale)
 		card_being_dragged.z_index = CARD_BOARD_Z_INDEX
 		card_being_dragged.card_slot_is_in = card_slot_found
+		var _hand_index_before_remove: int = player_hand_reference.player_hand.find(card_being_dragged)
 		player_hand_reference.remove_card_from_hand(card_being_dragged)
 		card_being_dragged.position = card_slot_found.position
 		if not _has_elusive_keyword(card_being_dragged):
@@ -269,6 +284,15 @@ func finish_drag():
 		add_card_to_play_order(card_being_dragged)
 		# Track as summoned (was_played_from_hand = true)
 		track_summoned_card(card_being_dragged, true)
+		# Snapshot for undo
+		undo_stack.append({
+			"card": card_being_dragged,
+			"hand_index": _hand_index_before_remove,
+			"mana_cost": card_cost,
+			"zone_key": zone_key,
+			"slot": card_slot_found
+		})
+		_update_undo_button()
 		# Card left hand — hide its glow
 		card_being_dragged.is_in_hand = false
 		card_being_dragged.hide_glow()
@@ -339,6 +363,13 @@ func resolve_played_cards() -> void:
 					if c_data and c_data.get("Name", "") == "Draven":
 						c.axe_play_count += 1
 						print("Draven (%s) has seen %d Spinning Axe(s) played" % [c.card_id, c.axe_play_count])
+		# Mark this card's summoned_cards entry as resolved so power-based level-up
+		# checks (e.g. Sion) only count cards that have actually flipped this turn.
+		for _i in range(summoned_cards.size() - 1, -1, -1):
+			var _e = summoned_cards[_i]
+			if _e.get("card_id") == card.card_id and not _e.get("is_resolved", true):
+				_e["is_resolved"] = true
+				break
 		# Check if this resolve triggers any level-ups (e.g. Ice Pillar → Trundle, Draven → Spinning Axe count)
 		check_level_ups_after_resolve(card)
 		# Wait for any level-up animation triggered by this resolve to finish
@@ -360,11 +391,88 @@ func resolve_played_cards() -> void:
 		# Pause between each card so play effects (e.g. card created in hand) can finish animating
 		await get_tree().create_timer(CARD_PAUSE_TIMER).timeout
 	played_cards_order.clear()
-			
+	undo_stack.clear()
+
 func connect_card_signals(card):
 	card.connect("hovered", on_hovered_over_card)
 	card.connect("hovered_off", on_hovered_off_card)
-	
+
+
+# ── Undo Actions ───────────────────────────────────────────────────────────────
+
+func _update_undo_button() -> void:
+	if not undo_button:
+		return
+	var in_play_phase: bool = (
+		game_manager_reference != null and
+		game_manager_reference.game_phase == game_manager_reference.GamePhase.TURN_LOOP and
+		game_manager_reference.round_phase == game_manager_reference.RoundPhase.PLAY
+	)
+	undo_button.disabled = undo_stack.is_empty() or not in_play_phase
+
+
+func _on_undo_button_pressed() -> void:
+	if undo_stack.is_empty():
+		return
+
+	# Collect total mana to refund
+	var total_mana_refund: int = 0
+	for entry in undo_stack:
+		total_mana_refund += int(entry.get("mana_cost", 0))
+
+	# Remove all played cards from board and tracking
+	for entry in undo_stack:
+		var card = entry["card"]
+		var zone_key: Vector2i = entry["zone_key"]
+		var slot = entry["slot"]
+		if not is_instance_valid(card):
+			continue
+		slot.card_in_slot = false
+		card.card_slot_is_in = null
+		board_reference.remove_card_from_zone(zone_key, card)
+		all_cards_in_play_order.erase(card)
+		# Restore visual state to hand
+		card.scale = Vector2(DEFAULT_CARD_SCALE, DEFAULT_CARD_SCALE)
+		card.z_index = 2
+		card.get_node("Area2D/CollisionShape2D").disabled = false
+		card.is_in_hand = true
+
+	# Re-insert cards into hand at their original indices (ascending order keeps indices correct)
+	var sorted_entries: Array = undo_stack.duplicate()
+	sorted_entries.sort_custom(func(a, b): return a["hand_index"] < b["hand_index"])
+	for entry in sorted_entries:
+		var card = entry["card"]
+		var original_index: int = entry["hand_index"]
+		if not is_instance_valid(card) or card in player_hand_reference.player_hand:
+			continue
+		var clamped_index: int = mini(original_index, player_hand_reference.player_hand.size())
+		player_hand_reference.player_hand.insert(clamped_index, card)
+
+	player_hand_reference.update_hand_position(0.3)
+
+	# Refund mana
+	if game_manager_reference and total_mana_refund > 0:
+		game_manager_reference.refund_player_mana(current_player_id, total_mana_refund)
+
+	# Clear turn tracking
+	played_cards_order.clear()
+	undo_stack.clear()
+
+	# Notify opponent to clear their pending cards for this turn
+	if _is_online() and multiplayer.get_peers().size() > 0:
+		rpc("_receive_undo_all_plays")
+
+	_notify_zone_power_changed()
+	_update_undo_button()
+	print("Undo: returned all played cards to hand, %d mana refunded" % total_mana_refund)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _receive_undo_all_plays() -> void:
+	_pending_opponent_cards.clear()
+	print("Received undo from opponent — cleared pending opponent cards")
+
+
 func on_left_click_released():
 	if card_being_dragged:
 		finish_drag()
@@ -500,6 +608,15 @@ func create_card_in_hand(card_id_to_create: String, creator_card_id: String = ""
 		print("create_card_in_hand: unknown card id ", card_id_to_create)
 		return
 
+	# If this champion has already globally leveled up, create the upgraded version instead.
+	var _upgrade_name: String = card_data.get("Name", "")
+	if _upgrade_name != "" and permanently_leveled_up.has(_upgrade_name):
+		card_id_to_create = permanently_leveled_up[_upgrade_name]
+		card_data = CardDatabase.CARDS.get(card_id_to_create)
+		if not card_data:
+			print("create_card_in_hand: upgraded card not found ", card_id_to_create)
+			return
+
 	var card_scene = CardDatabase.get_card_scene(card_data)
 	var new_card = card_scene.instantiate()
 	if new_card.get_script() == null:
@@ -539,17 +656,23 @@ func track_killed_card(card, killer_player_id: int = -1, killer_card_id: String 
 	killer_card_id: which card performed the kill (empty = unknown)."""
 	if not is_instance_valid(card):
 		return
+	# Capture the zone the card died in (card still has its slot at this point)
+	var zone_key: Vector2i = Vector2i(-1, -1)
+	if board_reference and card.card_slot_is_in:
+		zone_key = board_reference.get_zone_for_slot(card.card_slot_is_in)
 	killed_cards.append({
 		"card_id": card.card_id,
 		"owner_player_id": card.owner_player_id,
 		"killer_player_id": killer_player_id,
-		"killer_card_id": killer_card_id
+		"killer_card_id": killer_card_id,
+		"zone_key": zone_key,
+		"is_revived": false
 	})
 	print("Card killed and tracked: %s (killed by player %d, card %s) (total killed: %d)" % [
 		card.card_id, killer_player_id, killer_card_id, killed_cards.size()])
-	# Re-check Nasus level-up immediately when a real kill is recorded.
-	# This prevents delayed level-up until end-of-phase and keeps trigger order intuitive.
+	# Re-check level-up conditions immediately when a real kill is recorded.
 	LevelUpManager._check_nasus_levelup()
+	LevelUpManager._check_mordekaiser_levelup()
 
 
 func track_summoned_card(card, was_played_from_hand: bool = false) -> void:
@@ -561,7 +684,8 @@ func track_summoned_card(card, was_played_from_hand: bool = false) -> void:
 	summoned_cards.append({
 		"card_id": card.card_id,
 		"owner_player_id": card.owner_player_id,
-		"was_played_from_hand": was_played_from_hand
+		"was_played_from_hand": was_played_from_hand,
+		"is_resolved": not was_played_from_hand  # played-from-hand cards wait for the resolve flip; created cards are already on board
 	})
 	print("Card summoned tracked: %s (from_hand: %s, total: %d)" % [
 		card.card_id, was_played_from_hand, summoned_cards.size()])
@@ -638,6 +762,89 @@ func _receive_card_resolve_done(card_id: String) -> void:
 	_card_resolve_done_signals[card_id] = true
 
 
+@rpc("any_peer", "reliable")
+func _receive_opponent_mord_kill(card_id: String, zone_col: int, zone_row: int) -> void:
+	"""Mordekaiser killed a card — remove it from this client's board view."""
+	print("[RPC_MORD_KILL] received: card=%s zone=(%d,%d)" % [card_id, zone_col, zone_row])
+	var zone_key := Vector2i(zone_col, zone_row)
+	var target_card = null
+	for c in board_reference.get_cards_in_zone(zone_key):
+		if is_instance_valid(c) and c.card_id == card_id:
+			target_card = c
+			break
+	if not target_card:
+		print("[RPC_MORD_KILL] '%s' not found in zone %s — cards in zone: %s" % [card_id, str(zone_key), str(board_reference.get_cards_in_zone(zone_key).map(func(c): return c.card_id))])
+		return
+	if target_card.card_slot_is_in:
+		target_card.card_slot_is_in.card_in_slot = false
+	target_card.card_slot_is_in = null
+	board_reference.remove_card_from_zone(zone_key, target_card)
+	board_reference.reposition_cards_in_zone(zone_key)
+	target_card.queue_free()
+	_notify_zone_power_changed()
+	print("_receive_opponent_mord_kill: removed '%s' from zone %s" % [card_id, str(zone_key)])
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_mord_revive(card_id: String, zone_col: int, zone_row: int) -> void:
+	"""Mordekaiser revived a card — spawn it on this client's board view."""
+	print("[RPC_MORD_REVIVE] received: card=%s zone=(%d,%d)" % [card_id, zone_col, zone_row])
+	var zone_key := Vector2i(zone_col, zone_row)
+	var zone_slots: Array = board_reference.slots_by_zone.get(zone_key, [])
+	var available_slot = null
+	for slot in zone_slots:
+		if not slot.card_in_slot:
+			available_slot = slot
+			break
+	if not available_slot:
+		print("_receive_opponent_mord_revive: no slot in zone %s for '%s'" % [str(zone_key), card_id])
+		return
+
+	var card_data = CardDatabase.CARDS.get(card_id)
+	if not card_data:
+		print("_receive_opponent_mord_revive: no CardDatabase entry for '%s'" % card_id)
+		return
+	var card_scene = CardDatabase.get_card_scene(card_data)
+	var new_card = card_scene.instantiate()
+	if new_card.get_script() == null:
+		new_card.set_script(CardDatabase.get_card_script(card_data))
+
+	new_card.card_id = card_id
+	new_card.owner_player_id = 1 - current_player_id  # opponent is the non-local player
+	new_card.is_resolved = true
+	CardDatabase.populate_card_visuals(new_card, card_data)
+	new_card.position = available_slot.position
+	new_card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+	new_card.z_index = 0
+	new_card.card_slot_is_in = available_slot
+	new_card.get_node("Area2D/CollisionShape2D").disabled = true
+	if new_card.has_method("hide_card_back"):
+		new_card.hide_card_back()
+
+	add_child(new_card)
+	new_card.name = "Card"
+	available_slot.card_in_slot = true
+	board_reference.add_card_to_zone(zone_key, new_card)
+	board_reference.reposition_cards_in_zone(zone_key)
+	add_card_to_play_order(new_card)
+	track_summoned_card(new_card, false)
+	_notify_zone_power_changed()
+
+	# Mirror the flip animation the local client plays so the revive isn't instant.
+	var anim = new_card.get_node_or_null("AnimationPlayer")
+	if anim and anim.has_animation("card_flip"):
+		anim.play("card_flip")
+		await anim.animation_finished
+	else:
+		await get_tree().create_timer(0.5).timeout
+
+	# Run the full level-up suite so any condition satisfied by this revive on the
+	# receiving client (e.g. a local champion's threshold) is evaluated and acted on.
+	await LevelUpManager.check_level_ups_after_abilities()
+	await _wait_for_level_up()
+	print("_receive_opponent_mord_revive: spawned '%s' at zone %s" % [card_id, str(zone_key)])
+
+
 func _wait_for_opponent_card_resolve(key: String) -> void:
 	"""Block until the card owner's client sends the 'resolve done' signal for this card."""
 	while not _card_resolve_done_signals.get(key, false):
@@ -689,6 +896,19 @@ func track_recalled_card(card: Node, recaller_player_id: int, recaller_card_id: 
 	})
 	print("Recall tracked: %s recalled by %s (player %d, total: %d)" % [
 		card.card_id, recaller_card_id, recaller_player_id, recalled_cards.size()])
+
+
+func track_drawn_card(card_id: String, p_owner_player_id: int) -> void:
+	"""Record a card drawn from the deck. Used by Janna level-up condition."""
+	var gm = get_node_or_null("/root/Main/GameManager")
+	var current_turn = gm.turn_number if gm else 0
+	drawn_cards.append({
+		"card_id": card_id,
+		"owner_player_id": p_owner_player_id,
+		"turn": current_turn
+	})
+	print("Draw tracked: %s (player %d, turn %d, total: %d)" % [
+		card_id, p_owner_player_id, current_turn, drawn_cards.size()])
 
 
 func _sort_cards_by_flip_first(cards: Array) -> Array:
@@ -903,6 +1123,98 @@ func _receive_opponent_level_up(old_card_id: String, new_card_id: String) -> voi
 			card._perform_level_up(new_card_id)
 			return
 	print("_receive_opponent_level_up: '%s' not found on board" % old_card_id)
+
+
+func get_upgraded_card_id(card_id: String) -> String:
+	"""Return the globally-upgraded card_id for this card if its champion has permanently
+	leveled up, otherwise return the original card_id unchanged."""
+	var card_data = CardDatabase.CARDS.get(card_id)
+	if not card_data:
+		return card_id
+	var champ_name: String = card_data.get("Name", "")
+	return permanently_leveled_up.get(champ_name, card_id)
+
+
+func upgrade_all_copies(old_card_id: String, new_card_id: String) -> void:
+	"""After a champion plays its level-up animation, silently upgrade every remaining copy
+	owned by the local player: other board cards, hand cards (with flip animation), and deck
+	entries. Also notifies the opponent via RPC so their board view stays in sync."""
+	# ── Board copies ──────────────────────────────────────────────────────────────
+	for card in all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.card_slot_is_in:
+			continue
+		if card.card_id == old_card_id and card.owner_player_id == current_player_id:
+			card._apply_level_up_silently(new_card_id)
+
+	# ── Hand copies (flip animation so the player notices) ────────────────────────
+	if player_hand_reference:
+		for card in player_hand_reference.player_hand:
+			if not is_instance_valid(card) or card.card_id != old_card_id:
+				continue
+			card.card_id = new_card_id
+			var hand_data = CardDatabase.CARDS.get(new_card_id)
+			if hand_data:
+				CardDatabase.populate_card_visuals(card, hand_data)
+			var hand_anim = card.get_node_or_null("AnimationPlayer")
+			if hand_anim and hand_anim.has_animation("card_flip"):
+				hand_anim.play("card_flip")
+			print("[GLOBAL_LEVELUP] hand card upgraded: %s → %s" % [old_card_id, new_card_id])
+
+	# ── Deck entries ──────────────────────────────────────────────────────────────
+	var deck = get_node_or_null("/root/Main/Deck")
+	if deck and "player_deck" in deck:
+		for entry in deck.player_deck:
+			if entry.get("id", "") == old_card_id:
+				entry["id"] = new_card_id
+		print("[GLOBAL_LEVELUP] deck entries upgraded: %s → %s" % [old_card_id, new_card_id])
+
+	# ── Notify opponent to sync their board view ──────────────────────────────────
+	if _is_online():
+		rpc("_receive_opponent_champion_level_up_global", old_card_id, new_card_id)
+
+
+@rpc("any_peer", "reliable")
+func _receive_opponent_champion_level_up_global(old_card_id: String, new_card_id: String) -> void:
+	"""Opponent's champion has globally leveled up. Silently upgrade all remaining copies
+	of their card on this client's board (the primary copy was already animated by
+	_receive_opponent_level_up). Also updates opponent_hand_card_ids for behold."""
+	for card in all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.card_slot_is_in:
+			continue
+		if card.card_id == old_card_id and card.owner_player_id != current_player_id:
+			card._apply_level_up_silently(new_card_id)
+	for i in range(opponent_hand_card_ids.size()):
+		if opponent_hand_card_ids[i] == old_card_id:
+			opponent_hand_card_ids[i] = new_card_id
+	print("[RPC_GLOBAL_LEVELUP] opponent champion upgraded: %s → %s" % [old_card_id, new_card_id])
+
+
+func set_player_deep(player_id: int) -> void:
+	"""Permanently mark a player as Deep (runs out of deck cards).
+	Once Deep, the state never reverts — even if cards re-enter the deck.
+	Triggers the Deep aura (+3 power on Deep-keyword units) and Nautilus level-up check."""
+	if not player_state.has(player_id):
+		return
+	if player_state[player_id].get("is_deep", false):
+		return  # Already Deep — guard once-only
+	player_state[player_id]["is_deep"] = true
+	print("Player %d is now Deep!" % player_id)
+	_notify_zone_power_changed()
+	LevelUpManager.check_level_ups_after_deep_state_change(player_id)
+	# Sync to the opponent client so their board reflects our Deep state
+	if _is_online() and player_id == current_player_id:
+		rpc("_receive_opponent_became_deep")
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _receive_opponent_became_deep() -> void:
+	"""The opponent's deck ran out — mark their player ID (always 0 from local view) as Deep."""
+	var opponent_id: int = 1 - current_player_id  # Local view: we are current_player_id, they are the other
+	if player_state.has(opponent_id) and not player_state[opponent_id].get("is_deep", false):
+		player_state[opponent_id]["is_deep"] = true
+		print("Opponent (player %d local view) is now Deep!" % opponent_id)
+		_notify_zone_power_changed()
+		LevelUpManager.check_level_ups_after_deep_state_change(opponent_id)
 
 
 @rpc("any_peer", "reliable")

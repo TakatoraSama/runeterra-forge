@@ -195,6 +195,7 @@ func begin_round_start() -> void:
 	# --- Round Start: draw cards for the active player ---
 	if deck_reference and deck_reference.has_method("draw_cards"):
 		deck_reference.draw_cards(draw_per_turn)
+		await LevelUpManager.check_level_ups_after_draw()
 
 	# Bot: draw a card and synchronously queue its play for this round.
 	# Runs after mana is refilled so mana checks are correct.
@@ -585,6 +586,15 @@ func refill_player_mana(player_id: int) -> void:
 	_update_ui_indicators()
 
 
+func refund_player_mana(player_id: int, amount: int) -> void:
+	var state: PlayerManaState = _mana_by_player.get(player_id)
+	if not state or amount <= 0:
+		return
+	state.current_mana = mini(state.current_mana + amount, state.get_max_mana())
+	_emit_mana(player_id)
+	_update_ui_indicators()
+
+
 func spend_player_mana(player_id: int, amount: int) -> bool:
 	# Optional helper for later card costs.
 	if amount <= 0:
@@ -710,6 +720,8 @@ func _update_ui_indicators() -> void:
 	# Disable button when not in PLAY phase
 	if end_turn_button:
 		end_turn_button.disabled = not (game_phase == GamePhase.TURN_LOOP and round_phase == RoundPhase.PLAY)
+	if card_manager and card_manager.has_method("_update_undo_button"):
+		card_manager._update_undo_button()
 
 
 func _update_zone_power_display() -> void:

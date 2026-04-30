@@ -98,7 +98,7 @@ const KEYWORDS = {
 		"Positive": false
 	},
 	"Deep": {
-		"Description": "You are Deep when you're running out of deck. When that happens, grant units with the Deep keyword +3 Power.",
+		"Description": "You are Deep when you're running out of deck. When that happens, units with the Deep keyword have +3 Power.",
 		"Sprite": "res://Assets/KeywordSprites/Deep.webp",
 		"Stackable": false,
 		"Generatable": false,

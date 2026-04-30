@@ -33,6 +33,11 @@ func recalculate_auras() -> void:
 		for card in board.get_cards_in_zone(zone_key):
 			if is_instance_valid(card):
 				card.aura_power_modifier = 0
+	# Step 1b – reset aura_cost_modifier on every card in the local player's hand
+	if cm.player_hand_reference:
+		for card in cm.player_hand_reference.player_hand:
+			if is_instance_valid(card):
+				card.aura_cost_modifier = 0
 
 	# Step 2 – reapply auras from each active aura source
 	for card in cm.all_cards_in_play_order:
@@ -63,6 +68,11 @@ func recalculate_auras() -> void:
 			_apply_aura_irelia_lv2(card, zone_key)
 		elif ability_type == "aura_blade_buff":
 			_apply_aura_blade(card, zone_key)
+		elif card_name == "Nautilus" and level == 2:
+			_apply_aura_nautilus_lv2(card, zone_key)
+
+	# Deep aura is global (not per-card-source), applied after the per-card loop
+	_apply_aura_deep(cm)
 
 	# Step 3 – refresh the power label on every card currently on the board
 	for zone_key in board.cards_by_zone:
@@ -71,6 +81,21 @@ func recalculate_auras() -> void:
 				var power_label = card.get_node_or_null("CardFront/Power")
 				if power_label:
 					power_label.text = card.get_power_display_text()
+	# Step 3b – refresh cost labels and glow for hand cards (aura_cost_modifier may have changed)
+	if cm.player_hand_reference and cm.game_manager_reference:
+		var current_mana: int = cm.game_manager_reference.get_player_current_mana(cm.current_player_id)
+		for card in cm.player_hand_reference.player_hand:
+			if is_instance_valid(card):
+				var cost_label = card.get_node_or_null("CardFront/Cost")
+				if cost_label:
+					var current_cost = card.get_current_cost()
+					if card.cost_modifier < 0 or card.aura_cost_modifier < 0:
+						cost_label.text = "[color=green]%d[/color]" % current_cost
+					elif card.cost_modifier > 0:
+						cost_label.text = "[color=red]%d[/color]" % current_cost
+					else:
+						cost_label.text = str(current_cost)
+				card.update_glow(current_mana)
 
 
 # ─── Individual aura implementations ─────────────────────────────────────────
@@ -217,3 +242,52 @@ func _apply_aura_blade(blade_card: Node, zone_key: Vector2i) -> void:
 		if ally_zone == Vector2i(-1, -1) or ally_zone.y != ally_row:
 			continue
 		ally.aura_power_modifier += aura_amount
+
+
+func _apply_aura_deep(cm: Node) -> void:
+	"""Deep aura: all resolved on-board units with the 'Deep' keyword owned by a Deep player
+	gain +3 aura Power. Deep state is permanent once triggered (deck ran out)."""
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved or not card.card_slot_is_in:
+			continue
+		var owner_id: int = card.owner_player_id
+		var state: Dictionary = cm.player_state.get(owner_id, {})
+		if not state.get("is_deep", false):
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		var keywords: Array = card_data.get("Keyword", [])
+		if "Deep" in keywords:
+			card.aura_power_modifier += 3
+
+
+func _apply_aura_nautilus_lv2(nautilus_card: Node, zone_key: Vector2i) -> void:
+	"""Nautilus lv2 aura: Sea Monster cards in the owner's hand cost {cost_reduction} less.
+	Applied via aura_cost_modifier so it resets cleanly when Nautilus leaves the board."""
+	var cm := _get_card_manager()
+	if not cm or not cm.player_hand_reference:
+		return
+	var _unused := zone_key
+
+	var nautilus_data = CardDatabase.CARDS.get(nautilus_card.card_id)
+	if not nautilus_data:
+		return
+
+	var cost_reduction: int = int(nautilus_data.get("BalanceValues", {}).get("cost_reduction", 3))
+	var owner_id: int = nautilus_card.owner_player_id
+
+	# Only apply to the local player's hand (current_player_id == owner_id check)
+	if owner_id != cm.current_player_id:
+		return
+
+	for card in cm.player_hand_reference.player_hand:
+		if not is_instance_valid(card):
+			continue
+		if card.owner_player_id != owner_id:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("SubType", "") == "Sea Monster":
+			card.aura_cost_modifier -= cost_reduction

@@ -41,11 +41,14 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
+	_check_mordekaiser_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
 	_check_sion_levelup()
 	_check_draven_levelup()
+	_check_nautilus_levelup_all()
+	await _check_janna_levelup()
 	_check_sun_disc_transform()
 
 
@@ -56,12 +59,26 @@ func check_level_ups_after_abilities() -> void:
 	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
+	_check_mordekaiser_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
 	_check_sion_levelup()
 	_check_draven_levelup()
+	_check_nautilus_levelup_all()
+	await _check_janna_levelup()
 	_check_sun_disc_transform()
+
+
+func check_level_ups_after_draw() -> void:
+	"""Called after any card draw to check Janna's cumulative draw condition."""
+	await _check_janna_levelup()
+
+
+func check_level_ups_after_deep_state_change(player_id: int) -> void:
+	"""Called by CardManager.set_player_deep() when a player becomes Deep.
+	Checks whether Nautilus lv1 is on the board and can now level up."""
+	_check_nautilus_levelup(player_id)
 
 
 func check_conditional_buff_level_ups() -> void:
@@ -344,6 +361,10 @@ func _check_nasus_levelup() -> void:
 			continue
 		if card_data.get("Name", "") != "Nasus" or card_data.get("Level", 1) != 1:
 			continue
+		# Only trigger level-up for the local player's Nasus.
+		# The opponent's level-up is handled on their client and received via _receive_opponent_level_up RPC.
+		if card.owner_player_id != cm.current_player_id:
+			continue
 
 		var kill_threshold: int = int(card_data.get("BalanceValues", {}).get("kill_threshold", 2))
 		var owner_id: int       = int(card.owner_player_id)
@@ -524,10 +545,13 @@ func _check_sion_levelup() -> void:
 					total_power += int(entry_data.get("Power", 0))
 
 		for entry in cm.summoned_cards:
-			if int(entry.get("owner_player_id", -1)) == owner_id:
-				var entry_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
-				if entry_data and entry_data.has("Power"):
-					total_power += int(entry_data.get("Power", 0))
+			if int(entry.get("owner_player_id", -1)) != owner_id:
+				continue
+			if not entry.get("is_resolved", false):  # skip cards still face-down in the current resolve queue
+				continue
+			var entry_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
+			if entry_data and entry_data.has("Power"):
+				total_power += int(entry_data.get("Power", 0))
 
 		if total_power < power_threshold:
 			continue
@@ -609,6 +633,88 @@ func _check_draven_levelup() -> void:
 			_notify_zone_power_changed()
 
 
+func _check_nautilus_levelup_all() -> void:
+	"""Check Nautilus level-up for both players (called during resolve / ability loops)."""
+	_check_nautilus_levelup(0)
+	_check_nautilus_levelup(1)
+
+
+func _check_nautilus_levelup(player_id: int) -> void:
+	"""Nautilus lv1 → lv2: levels up once the owning player is Deep (deck ran out).
+	Only fires for the local player's Nautilus — the level-up itself syncs via RPC."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	# Guard: player must be Deep
+	if not cm.player_state.get(player_id, {}).get("is_deep", false):
+		return
+	# Only trigger level-ups for cards owned by the local player
+	if player_id != cm.current_player_id:
+		return
+
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		if card.owner_player_id != player_id:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("Name", "") != "Nautilus" or card_data.get("Level", 1) != 1:
+			continue
+		var level_up_to = card_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Nautilus lv1: player %d is Deep — leveling up!" % player_id)
+			card._perform_level_up(str(level_up_to))
+			_notify_zone_power_changed()
+
+
+func _check_mordekaiser_levelup() -> void:
+	"""Mordekaiser lv1 → lv2: levels up when owned allies' death score reaches killed_threshold.
+	Each ally death = 1 point. Each ally death with base Power >= 5 = 2 points.
+	All deaths count, including revived ones (each death event is a separate entry).
+	Only fires for the local player's Mordekaiser."""
+	var cm := _get_card_manager()
+	if not cm or cm.killed_cards.is_empty():
+		return
+
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:
+			continue
+		if card.owner_player_id != cm.current_player_id:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data:
+			continue
+		if card_data.get("Name", "") != "Mordekaiser" or card_data.get("Level", 1) != 1:
+			continue
+
+		var killed_threshold: int = int(card_data.get("BalanceValues", {}).get("killed_threshold", 8))
+		var owner_id: int = card.owner_player_id
+		var score := 0
+
+		for entry in cm.killed_cards:
+			if int(entry.get("owner_player_id", -1)) != owner_id:
+				continue
+			# Base power from CardDatabase (not current modified power)
+			var killed_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
+			var base_power: int = int(killed_data.get("Power", 0)) if killed_data else 0
+			score += 2 if base_power >= 5 else 1
+
+		if score < killed_threshold:
+			continue
+
+		var level_up_to = card_data.get("LevelUpTo", "")
+		if level_up_to and str(level_up_to) != "":
+			print("Mordekaiser lv1 met level-up condition! (score %d / %d)" % [score, killed_threshold])
+			card._perform_level_up(str(level_up_to))
+			_notify_zone_power_changed()
+
+
 func _on_sun_disc_restored(owner_id: int) -> void:
 	"""Side-effects triggered when Buried Sun Disc transforms into Restored Sun Disc:
 	  1. Draw each Ascended card from the deck that is not currently beheld.
@@ -631,7 +737,8 @@ func _on_sun_disc_restored(owner_id: int) -> void:
 	var deck_ref := _get_deck()
 	if deck_ref and owner_id == cm.current_player_id:
 		var cards_to_draw: Array = []
-		for deck_card_id in deck_ref.player_deck:
+		for deck_entry in deck_ref.player_deck:
+			var deck_card_id: String = deck_entry["id"]
 			var deck_data = CardDatabase.CARDS.get(deck_card_id)
 			if not deck_data or deck_data.get("SubType", "") != "Ascended":
 				continue
@@ -667,3 +774,36 @@ func _on_sun_disc_restored(owner_id: int) -> void:
 			ally._perform_level_up(str(level_up_to))
 
 	_notify_zone_power_changed()
+
+
+func _check_janna_levelup() -> void:
+	"""Janna lv1 → lv2: levels up after drawing draw_threshold+ cards cumulatively."""
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	for janna_card in cm.all_cards_in_play_order:
+		if not is_instance_valid(janna_card) or not janna_card.is_resolved:
+			continue
+		if not janna_card.card_slot_is_in:
+			continue
+		var janna_data = CardDatabase.CARDS.get(janna_card.card_id)
+		if not janna_data:
+			continue
+		if janna_data.get("Name", "") != "Janna" or janna_data.get("Level", 1) != 1:
+			continue
+		var owner_id: int = janna_card.owner_player_id
+		if owner_id != cm.current_player_id:
+			continue  # opponent's Janna levels up via _receive_opponent_level_up RPC on their client
+		var draw_threshold: int = int(janna_data.get("BalanceValues", {}).get("draw_threshold", 12))
+		var count := 0
+		for entry in cm.drawn_cards:
+			if int(entry.get("owner_player_id", -1)) == owner_id:
+				count += 1
+		if count < draw_threshold:
+			continue
+		var level_up_to = janna_data.get("LevelUpTo", "")
+		if not level_up_to or str(level_up_to) == "":
+			continue
+		print("Janna has drawn %d cards — leveling up to lv2!" % count)
+		await janna_card._perform_level_up(str(level_up_to))
+		_notify_zone_power_changed()

@@ -545,8 +545,8 @@ const CARDS = {
 		"Skill": "{Aura}: Sea Monsters allies cost {cost_reduction} less.",
 		"LevelUp": "",
 		"LevelUpTo": "",
-		"AbilityType": "",
-		"BalanceValues": {"cost_reduction": 3},
+		"AbilityType": "nautilus_levelup_create_sea_monsters",
+		"BalanceValues": {"cost_reduction": 3, "created_cost": 3, "created_count": 3},
 		"PreviewTooltip": ["Nautilus1", "Nautilus2"]
 	},
 
@@ -562,10 +562,10 @@ const CARDS = {
 		"Cost": 1,
 		"Power": 2,
 		"Keyword": [],
-		"Skill": "{Play}: {Updraft} {updraft_threshold} to draw that much at the next {Round Start}.",
+		"Skill": "{Play}: {Updraft} {updraft_threshold} cards to draw that much now.",
 		"LevelUp": "You've drawn {draw_threshold}+ cards.",
 		"LevelUpTo": "Janna2",
-		"AbilityType": "",
+		"AbilityType": "janna_updraft_draw",
 		"BalanceValues": {"updraft_threshold": 2, "draw_threshold": 12},
 		"PreviewTooltip": ["Janna1", "Janna2"]
 	},
@@ -583,7 +583,7 @@ const CARDS = {
 		"Skill": "{Play} or {Round Start}: Draw {draw_threshold}. [br] When you draw a card, reduce its cost by {cost_reduction}.",
 		"LevelUp": "",
 		"LevelUpTo": null,
-		"AbilityType": "",
+		"AbilityType": "janna_draw_cost_reduce",
 		"BalanceValues": {"updraft_threshold": 2, "draw_threshold": 1, "cost_reduction": 1},
 		"PreviewTooltip": ["Janna1", "Janna2"]
 	},
@@ -600,11 +600,11 @@ const CARDS = {
 		"Cost": 5,
 		"Power": 8,
 		"Keyword": ["Challenger"],
-		"Skill": "{Play}: Kill 2 allies here. [br] When another ally dies, revive it.",
+		"Skill": "{Play}: Kill 2 allies here that aren't [Mordekaiser]. [br] When another ally dies, revive it.",
 		"LevelUp": "{killed_threshold}+ allies have died. Allies with 5+ Power count twice.",
 		"LevelUpTo": "Mordekaiser2",
-		"AbilityType": "",
-		"BalanceValues": {"killed_threshold": 8},
+		"AbilityType": "mordekaiser_play_kill",
+		"BalanceValues": {"killed_threshold": 8, "play_kill_count": 2},
 		"PreviewTooltip": ["Mordekaiser1", "Mordekaiser2"]
 	},
 	"Mordekaiser2": {
@@ -618,10 +618,10 @@ const CARDS = {
 		"Cost": 5,
 		"Power": 9,
 		"Keyword": ["Challenger"],
-		"Skill": "When another ally dies, revive it. [br] {Round End}: Kill other units here, remaining only me and the weakest enemy.",
+		"Skill": "When another ally dies, revive it. [br] {Round End}: Kill ALL units here, leaving only me and the weakest enemy.",
 		"LevelUp": "",
 		"LevelUpTo": null,
-		"AbilityType": "",
+		"AbilityType": "mordekaiser_round_end_purge",
 		"BalanceValues": {"revive_buff": 2},
 		"PreviewTooltip": ["Mordekaiser1", "Mordekaiser2"]
 	},
@@ -1245,9 +1245,9 @@ const CARDS = {
 		"Cost": 2,
 		"Power": 2,
 		"Keyword": ["Deep"],
-		"Skill": "",
-		"AbilityType": "",
-		"BalanceValues": {},
+		"Skill": "{Play}: Draw {draw_count} non-champion card then discard it.",
+		"AbilityType": "sea_scarab_draw_discard",
+		"BalanceValues": {"draw_count": 1},
 		"PreviewTooltip": ["SeaScarab"]
 	},
 	"Megatusk": {
@@ -1258,11 +1258,11 @@ const CARDS = {
 		"Collectible": true,
 		"Sprite": "res://Assets/CardSprites/DummySprite.webp",
 		"Cost": 3,
-		"Power": 3,
+		"Power": 2,
 		"Keyword": ["Deep"],
-		"Skill": "",
-		"AbilityType": "",
-		"BalanceValues": {},
+		"Skill": "{Round End}: If you're :Deep:{Deep}, grant allies here +{power_bonus} Power.",
+		"AbilityType": "megatusk_deep_buff_lane",
+		"BalanceValues": {"power_bonus": 1},
 		"PreviewTooltip": ["Megatusk"]
 	},
 	"TheBeastBelow": {
@@ -1273,7 +1273,7 @@ const CARDS = {
 		"Collectible": true,
 		"Sprite": "res://Assets/CardSprites/DummySprite.webp",
 		"Cost": 4,
-		"Power": 4,
+		"Power": 5,
 		"Keyword": ["Deep"],
 		"Skill": "",
 		"AbilityType": "",
@@ -1290,9 +1290,9 @@ const CARDS = {
 		"Cost": 5,
 		"Power": 5,
 		"Keyword": ["Deep"],
-		"Skill": "",
-		"AbilityType": "",
-		"BalanceValues": {},
+		"Skill": "{Play}: Draw {draw_count}.",
+		"AbilityType": "abyssal_eye_draw",
+		"BalanceValues": {"draw_count": 1},
 		"PreviewTooltip": ["AbyssalEye"]
 	},
 	"DevourerOfTheDepths": {
@@ -1303,10 +1303,10 @@ const CARDS = {
 		"Collectible": true,
 		"Sprite": "res://Assets/CardSprites/DummySprite.webp",
 		"Cost": 6,
-		"Power": 6,
+		"Power": 7,
 		"Keyword": ["Deep"],
-		"Skill": "",
-		"AbilityType": "",
+		"Skill": "{Play}: If you're :Deep:{Deep}, kill an enemy with less Power than me.",
+		"AbilityType": "devourer_deep_kill_enemy",
 		"BalanceValues": {},
 		"PreviewTooltip": ["DevourerOfTheDepths"]
 	},
@@ -1320,9 +1320,9 @@ const CARDS = {
 		"Cost": 7,
 		"Power": 7,
 		"Keyword": ["Deep"],
-		"Skill": "",
-		"AbilityType": "",
-		"BalanceValues": {},
+		"Skill": "{Round End}: Grant enemies here -{power_reduction} Power.",
+		"AbilityType": "terror_debuff_lane_enemies",
+		"BalanceValues": {"power_reduction": 1},
 		"PreviewTooltip": ["TerrorOfTheTides"]
 	},
 
