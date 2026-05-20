@@ -2,20 +2,20 @@ extends Node2D
 
 const CARD_DRAW_SPEED = 0.2
 
-# var player_deck = [
-# 	{"id": "Azir1", "cost_mod": 0},
-# 	{"id": "Renekton1", "cost_mod": 0},
-# 	{"id": "Nasus1", "cost_mod": 0},
-# 	{"id": "Xerath1", "cost_mod": 0},
-# 	{"id": "Tryndamere1", "cost_mod": 0},
-# 	{"id": "Ahri1", "cost_mod": 0},
-# 	{"id": "Kennen1", "cost_mod": 0},
-# 	{"id": "NavoriConspirator", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Draven1", "cost_mod": 0},
-# 	{"id": "Rumble1", "cost_mod": 0},
-# 	{"id": "Sion1", "cost_mod": 0},
-# ]
+var player_deck = [
+	{"id": "Azir1", "cost_mod": 0},
+	{"id": "Renekton1", "cost_mod": 0},
+	{"id": "Nasus1", "cost_mod": 0},
+	{"id": "Xerath1", "cost_mod": 0},
+	{"id": "Tryndamere1", "cost_mod": 0},
+	{"id": "Ahri1", "cost_mod": 0},
+	{"id": "Kennen1", "cost_mod": 0},
+	{"id": "NavoriConspirator", "cost_mod": 0},
+	{"id": "Janna1", "cost_mod": 0},
+	{"id": "Draven1", "cost_mod": 0},
+	{"id": "Rumble1", "cost_mod": 0},
+	{"id": "Sion1", "cost_mod": 0},
+]
 # var player_deck = [
 # 	{"id": "SeaScarab", "cost_mod": 0},
 # 	{"id": "Megatusk", "cost_mod": 0},
@@ -30,20 +30,6 @@ const CARD_DRAW_SPEED = 0.2
 # 	{"id": "Janna1", "cost_mod": 0},
 # 	{"id": "Nautilus1", "cost_mod": 0},
 # ]
-var player_deck = [
-	{"id": "Nasus1", "cost_mod": -5},
-	{"id": "Nasus1", "cost_mod": -5},
-	{"id": "Nasus1", "cost_mod": -5},
-	{"id": "Sion1", "cost_mod": -5},
-	{"id": "Sion1", "cost_mod": -5},
-	{"id": "Sion1", "cost_mod": -5},
-	{"id": "Mordekaiser1", "cost_mod": -5},
-	{"id": "Janna1", "cost_mod": -5},
-	{"id": "Janna1", "cost_mod": -5},
-	{"id": "Janna1", "cost_mod": -5},
-	{"id": "Mordekaiser1", "cost_mod": -5},
-	{"id": "Mordekaiser1", "cost_mod": -5},
-]
 var owner_player_id: int = 1  # Which player owns this deck (1 = bottom/local)
 
 

@@ -41,7 +41,6 @@ func check_level_ups_after_resolve(resolved_card: Node) -> void:
 	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
-	_check_mordekaiser_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
@@ -59,7 +58,6 @@ func check_level_ups_after_abilities() -> void:
 	_check_irelia_levelup()
 	_check_xerath_levelup()
 	_check_nasus_levelup()
-	_check_mordekaiser_levelup()
 	_check_ahri_levelup()
 	_check_kennen_levelup()
 	_check_rumble_levelup()
@@ -667,50 +665,6 @@ func _check_nautilus_levelup(player_id: int) -> void:
 		var level_up_to = card_data.get("LevelUpTo", "")
 		if level_up_to and str(level_up_to) != "":
 			print("Nautilus lv1: player %d is Deep — leveling up!" % player_id)
-			card._perform_level_up(str(level_up_to))
-			_notify_zone_power_changed()
-
-
-func _check_mordekaiser_levelup() -> void:
-	"""Mordekaiser lv1 → lv2: levels up when owned allies' death score reaches killed_threshold.
-	Each ally death = 1 point. Each ally death with base Power >= 5 = 2 points.
-	All deaths count, including revived ones (each death event is a separate entry).
-	Only fires for the local player's Mordekaiser."""
-	var cm := _get_card_manager()
-	if not cm or cm.killed_cards.is_empty():
-		return
-
-	for card in cm.all_cards_in_play_order:
-		if not is_instance_valid(card) or not card.is_resolved:
-			continue
-		if not card.card_slot_is_in:
-			continue
-		if card.owner_player_id != cm.current_player_id:
-			continue
-		var card_data = CardDatabase.CARDS.get(card.card_id)
-		if not card_data:
-			continue
-		if card_data.get("Name", "") != "Mordekaiser" or card_data.get("Level", 1) != 1:
-			continue
-
-		var killed_threshold: int = int(card_data.get("BalanceValues", {}).get("killed_threshold", 8))
-		var owner_id: int = card.owner_player_id
-		var score := 0
-
-		for entry in cm.killed_cards:
-			if int(entry.get("owner_player_id", -1)) != owner_id:
-				continue
-			# Base power from CardDatabase (not current modified power)
-			var killed_data = CardDatabase.CARDS.get(str(entry.get("card_id", "")))
-			var base_power: int = int(killed_data.get("Power", 0)) if killed_data else 0
-			score += 2 if base_power >= 5 else 1
-
-		if score < killed_threshold:
-			continue
-
-		var level_up_to = card_data.get("LevelUpTo", "")
-		if level_up_to and str(level_up_to) != "":
-			print("Mordekaiser lv1 met level-up condition! (score %d / %d)" % [score, killed_threshold])
 			card._perform_level_up(str(level_up_to))
 			_notify_zone_power_changed()
 

@@ -672,7 +672,6 @@ func track_killed_card(card, killer_player_id: int = -1, killer_card_id: String 
 		card.card_id, killer_player_id, killer_card_id, killed_cards.size()])
 	# Re-check level-up conditions immediately when a real kill is recorded.
 	LevelUpManager._check_nasus_levelup()
-	LevelUpManager._check_mordekaiser_levelup()
 
 
 func track_summoned_card(card, was_played_from_hand: bool = false) -> void:
@@ -762,87 +761,6 @@ func _receive_card_resolve_done(card_id: String) -> void:
 	_card_resolve_done_signals[card_id] = true
 
 
-@rpc("any_peer", "reliable")
-func _receive_opponent_mord_kill(card_id: String, zone_col: int, zone_row: int) -> void:
-	"""Mordekaiser killed a card — remove it from this client's board view."""
-	print("[RPC_MORD_KILL] received: card=%s zone=(%d,%d)" % [card_id, zone_col, zone_row])
-	var zone_key := Vector2i(zone_col, zone_row)
-	var target_card = null
-	for c in board_reference.get_cards_in_zone(zone_key):
-		if is_instance_valid(c) and c.card_id == card_id:
-			target_card = c
-			break
-	if not target_card:
-		print("[RPC_MORD_KILL] '%s' not found in zone %s — cards in zone: %s" % [card_id, str(zone_key), str(board_reference.get_cards_in_zone(zone_key).map(func(c): return c.card_id))])
-		return
-	if target_card.card_slot_is_in:
-		target_card.card_slot_is_in.card_in_slot = false
-	target_card.card_slot_is_in = null
-	board_reference.remove_card_from_zone(zone_key, target_card)
-	board_reference.reposition_cards_in_zone(zone_key)
-	target_card.queue_free()
-	_notify_zone_power_changed()
-	print("_receive_opponent_mord_kill: removed '%s' from zone %s" % [card_id, str(zone_key)])
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_mord_revive(card_id: String, zone_col: int, zone_row: int) -> void:
-	"""Mordekaiser revived a card — spawn it on this client's board view."""
-	print("[RPC_MORD_REVIVE] received: card=%s zone=(%d,%d)" % [card_id, zone_col, zone_row])
-	var zone_key := Vector2i(zone_col, zone_row)
-	var zone_slots: Array = board_reference.slots_by_zone.get(zone_key, [])
-	var available_slot = null
-	for slot in zone_slots:
-		if not slot.card_in_slot:
-			available_slot = slot
-			break
-	if not available_slot:
-		print("_receive_opponent_mord_revive: no slot in zone %s for '%s'" % [str(zone_key), card_id])
-		return
-
-	var card_data = CardDatabase.CARDS.get(card_id)
-	if not card_data:
-		print("_receive_opponent_mord_revive: no CardDatabase entry for '%s'" % card_id)
-		return
-	var card_scene = CardDatabase.get_card_scene(card_data)
-	var new_card = card_scene.instantiate()
-	if new_card.get_script() == null:
-		new_card.set_script(CardDatabase.get_card_script(card_data))
-
-	new_card.card_id = card_id
-	new_card.owner_player_id = 1 - current_player_id  # opponent is the non-local player
-	new_card.is_resolved = true
-	CardDatabase.populate_card_visuals(new_card, card_data)
-	new_card.position = available_slot.position
-	new_card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
-	new_card.z_index = 0
-	new_card.card_slot_is_in = available_slot
-	new_card.get_node("Area2D/CollisionShape2D").disabled = true
-	if new_card.has_method("hide_card_back"):
-		new_card.hide_card_back()
-
-	add_child(new_card)
-	new_card.name = "Card"
-	available_slot.card_in_slot = true
-	board_reference.add_card_to_zone(zone_key, new_card)
-	board_reference.reposition_cards_in_zone(zone_key)
-	add_card_to_play_order(new_card)
-	track_summoned_card(new_card, false)
-	_notify_zone_power_changed()
-
-	# Mirror the flip animation the local client plays so the revive isn't instant.
-	var anim = new_card.get_node_or_null("AnimationPlayer")
-	if anim and anim.has_animation("card_flip"):
-		anim.play("card_flip")
-		await anim.animation_finished
-	else:
-		await get_tree().create_timer(0.5).timeout
-
-	# Run the full level-up suite so any condition satisfied by this revive on the
-	# receiving client (e.g. a local champion's threshold) is evaluated and acted on.
-	await LevelUpManager.check_level_ups_after_abilities()
-	await _wait_for_level_up()
-	print("_receive_opponent_mord_revive: spawned '%s' at zone %s" % [card_id, str(zone_key)])
 
 
 func _wait_for_opponent_card_resolve(key: String) -> void:

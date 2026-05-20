@@ -11,6 +11,8 @@ var is_resolved: bool = false
 var is_in_hand: bool = false
 var runtime_keywords: Array = []
 var aura_power_modifier: int = 0
+var aura_cost_modifier: int = 0
+var cost_modifier: int = 0
 var _dissolve_mat: ShaderMaterial = null
 
 var _card_manager: Node = null
@@ -100,7 +102,7 @@ func get_current_cost() -> int:
 	var card_data = CardDatabase.CARDS.get(card_id)
 	if not card_data:
 		return 0
-	return max(0, int(card_data.get("Cost", 0)))
+	return max(0, int(card_data.get("Cost", 0)) + cost_modifier + aura_cost_modifier)
 
 
 func _on_area_2d_mouse_entered() -> void:
