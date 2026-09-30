@@ -2,7 +2,9 @@ extends Node2D
 
 const CARD_DRAW_SPEED = 0.2
 
-var player_deck = [
+## Fallback deck, used when no saved deck is active or the active deck has no
+## valid card ids. Always duplicated before use, never mutated in place.
+const DEFAULT_DECK := [
 	{"id": "Azir1", "cost_mod": 0},
 	{"id": "Renekton1", "cost_mod": 0},
 	{"id": "Nasus1", "cost_mod": 0},
@@ -16,25 +18,41 @@ var player_deck = [
 	{"id": "Rumble1", "cost_mod": 0},
 	{"id": "Sion1", "cost_mod": 0},
 ]
-# var player_deck = [
-# 	{"id": "SeaScarab", "cost_mod": 0},
-# 	{"id": "Megatusk", "cost_mod": 0},
-# 	{"id": "TheBeastBelow", "cost_mod": 0},
-# 	{"id": "AbyssalEye", "cost_mod": 0},
-# 	{"id": "DevourerOfTheDepths", "cost_mod": 0},
-# 	{"id": "TerrorOfTheTides", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Janna1", "cost_mod": 0},
-# 	{"id": "Nautilus1", "cost_mod": 0},
-# ]
+var player_deck: Array = []
 var owner_player_id: int = 1  # Which player owns this deck (1 = bottom/local)
 
 
 func _ready() -> void:
+	_build_player_deck()
 	$RichTextLabel.text = str(player_deck.size())
+
+
+## Fill player_deck from the deck the Deck Builder made active.
+## DeckManager is an autoload, so it has already run _ready() (loading
+## user://decks.json and user://active_deck.json) before this scene exists.
+func _build_player_deck() -> void:
+	var dm := get_node_or_null("/root/DeckManager")
+	var saved_ids: Array = dm.get_active_deck() if dm else []
+	var active_name: String = dm.get_active_deck_name() if dm else ""
+
+	var entries: Array = []
+	for raw_id in saved_ids:
+		var card_id: String = str(raw_id)
+		if not CardDatabase.CARDS.has(card_id):
+			push_warning("Deck: deck '%s' has unknown card id '%s', skipping" % [active_name, card_id])
+			continue
+		entries.append({"id": card_id, "cost_mod": 0})
+
+	if entries.is_empty():
+		player_deck = DEFAULT_DECK.duplicate(true)
+		if saved_ids.is_empty():
+			print("Deck: no active saved deck, using default deck (%d cards)" % player_deck.size())
+		else:
+			print("Deck: active deck '%s' had no valid cards, using default deck (%d cards)" % [active_name, player_deck.size()])
+		return
+
+	player_deck = entries
+	print("Deck: using saved deck '%s' (%d cards)" % [active_name, player_deck.size()])
 
 
 # --- Shuffle ---

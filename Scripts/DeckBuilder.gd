@@ -258,6 +258,7 @@ func _on_load_option_selected(index: int) -> void:
 	var deck_name: String = _load_option.get_item_text(index)
 	_name_field.text = deck_name
 	_deck_cards = DeckManager.get_deck(deck_name)
+	DeckManager.set_active_deck(deck_name)
 	_saved_deck_cards = _deck_cards.duplicate()
 	_rebuild_deck()
 	_update_collection_highlights()
