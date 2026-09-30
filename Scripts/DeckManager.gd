@@ -58,7 +58,6 @@ func get_active_deck() -> Array:
 	return get_deck(active_deck_name)
 
 
-
 func get_active_deck_name() -> String:
 	return active_deck_name
 
