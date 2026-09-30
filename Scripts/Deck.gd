@@ -51,6 +51,13 @@ func _build_player_deck() -> void:
 			print("Deck: active deck '%s' had no valid cards, using default deck (%d cards)" % [active_name, player_deck.size()])
 		return
 
+	# A saved deck is only used at full size: a partial deck would start the
+	# match short (and immediately Deep), so it is not worth using.
+	if entries.size() != DeckManager.MAX_DECK_SIZE:
+		push_warning("Deck: deck '%s' has %d valid cards, expected %d, using default deck" % [active_name, entries.size(), DeckManager.MAX_DECK_SIZE])
+		player_deck = DEFAULT_DECK.duplicate(true)
+		return
+
 	player_deck = entries
 	print("Deck: using saved deck '%s' (%d cards)" % [active_name, player_deck.size()])
 
