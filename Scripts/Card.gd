@@ -27,6 +27,16 @@ var _game_manager: Node = null
 @onready var animation_player: AnimationPlayer = $"AnimationPlayer"
 
 const _DISSOLVE_SHADER = preload("res://Materials/card_discard_dissolve.gdshader")
+const _STUN_SWIRL_SHADER = preload("res://Materials/stun_swirl.gdshader")
+
+# Stun visual: symbol sits over the art area, clear of the Cost/Power corners.
+# Values are in card-local pixels (630×880 card, origin at centre).
+const STUN_FADE_TIME := 0.3
+const STUN_VFX_SIZE := Vector2(420, 420)
+const STUN_VFX_CENTER := Vector2(0, -170)
+
+var _stun_vfx: ColorRect = null
+var _stun_tween: Tween = null
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -54,6 +64,7 @@ func _ready() -> void:
 	mat.set_shader_parameter("gradient_weight", 0.5)
 	mat.set_shader_parameter("noise_seed", 0.0)
 	mat.set_shader_parameter("gray_amount", 0.0)
+	mat.set_shader_parameter("stun_amount", 0.0)
 	_dissolve_mat = mat
 	for path in ["CardFront/CardBase", "CardFront/CardSpriteParent/CardSprite",
 			"CardFront/CardMana", "CardFront/CardPower",
@@ -61,6 +72,9 @@ func _ready() -> void:
 		var sprite = get_node_or_null(path)
 		if sprite:
 			sprite.material = mat
+	_build_stun_vfx()
+	if animation_player:
+		animation_player.animation_started.connect(_on_animation_started)
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -114,6 +128,12 @@ func _on_animation_finished(anim_name: StringName) -> void:
 	# After any flip animation, keep the back behind the front.
 	if anim_name == &"card_flip" or anim_name == &"card_flip_play":
 		hide_card_back()
+
+
+func _on_animation_started(anim_name: StringName) -> void:
+	# The kill animation only fades CardFront; fade the stun symbol with it.
+	if anim_name == &"card_killed":
+		_hide_stun_symbol(0.5)
 
 
 func get_current_power() -> int:
@@ -306,6 +326,9 @@ func _perform_level_up(new_card_id: String) -> void:
 
 	# Animation is starting — advance display to show this level's stats now
 	_display_card_id = new_card_id
+	# Hide the stun symbol so it doesn't float over the card back mid-spin
+	if _stun_vfx:
+		_stun_vfx.visible = false
 
 	# ── 1. Fly to screen centre and scale up to 0.5 simultaneously (1 sec) ─
 	var original_global_pos := global_position
@@ -349,6 +372,8 @@ func _perform_level_up(new_card_id: String) -> void:
 	await tween_back.finished
 
 	z_index = restore_z
+	if _stun_vfx:
+		_stun_vfx.visible = "Stun" in runtime_keywords
 
 	# ── 6. Brief settle pause (0.5 sec) ──────────────────────────────────
 	await get_tree().create_timer(0.5).timeout
@@ -382,6 +407,8 @@ func add_runtime_keyword(keyword_name: String) -> void:
 		return
 	runtime_keywords.append(keyword_name)
 	_refresh_keyword_display()
+	if keyword_name == "Stun":
+		_set_stun_visual(true)
 
 
 func remove_runtime_keyword(keyword_name: String) -> void:
@@ -389,6 +416,58 @@ func remove_runtime_keyword(keyword_name: String) -> void:
 	if keyword_name in runtime_keywords:
 		runtime_keywords.erase(keyword_name)
 		_refresh_keyword_display()
+		if keyword_name == "Stun":
+			_set_stun_visual(false)
+
+
+# ── Stun visual ────────────────────────────────────────────────────────────
+
+func _build_stun_vfx() -> void:
+	"""Create the spinning 'confused' symbol (procedural shader on a ColorRect). Hidden until stunned."""
+	var swirl_mat := ShaderMaterial.new()
+	swirl_mat.shader = _STUN_SWIRL_SHADER
+	swirl_mat.set_shader_parameter("alpha", 0.0)
+	_stun_vfx = ColorRect.new()
+	_stun_vfx.name = "StunVfx"
+	_stun_vfx.material = swirl_mat
+	_stun_vfx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stun_vfx.size = STUN_VFX_SIZE
+	_stun_vfx.position = STUN_VFX_CENTER - STUN_VFX_SIZE / 2.0
+	_stun_vfx.z_index = -4  # above CardFront sprites/labels (-5..-11), below a shown CardBack (5)
+	_stun_vfx.visible = false
+	add_child(_stun_vfx)
+
+
+func _set_stun_visual(stunned: bool) -> void:
+	"""Fade the purple tint and the swirl symbol in or out."""
+	if not _stun_vfx:
+		return
+	if _stun_tween and _stun_tween.is_valid():
+		_stun_tween.kill()
+	var target := 1.0 if stunned else 0.0
+	var swirl_mat := _stun_vfx.material as ShaderMaterial
+	if stunned:
+		_stun_vfx.visible = true
+	_stun_tween = create_tween().set_parallel(true)
+	if _dissolve_mat:
+		_stun_tween.tween_method(func(v: float): _dissolve_mat.set_shader_parameter("stun_amount", v),
+			float(_dissolve_mat.get_shader_parameter("stun_amount")), target, STUN_FADE_TIME)
+	_stun_tween.tween_method(func(v: float): swirl_mat.set_shader_parameter("alpha", v),
+		float(swirl_mat.get_shader_parameter("alpha")), target, STUN_FADE_TIME)
+	if not stunned:
+		_stun_tween.chain().tween_callback(func(): _stun_vfx.visible = false)
+
+
+func _hide_stun_symbol(duration: float) -> void:
+	"""Fade only the swirl symbol (used when the card is killed or dissolved)."""
+	if not _stun_vfx or not _stun_vfx.visible:
+		return
+	if _stun_tween and _stun_tween.is_valid():
+		_stun_tween.kill()
+	var swirl_mat := _stun_vfx.material as ShaderMaterial
+	_stun_tween = create_tween()
+	_stun_tween.tween_method(func(v: float): swirl_mat.set_shader_parameter("alpha", v),
+		float(swirl_mat.get_shader_parameter("alpha")), 0.0, duration)
 
 
 func _refresh_keyword_display() -> void:
@@ -419,6 +498,7 @@ func _refresh_keyword_display() -> void:
 
 func play_discard_dissolve(duration: float = 0.8) -> void:
 	hide_card_back()
+	_hide_stun_symbol(duration)
 	if _dissolve_mat:
 		_dissolve_mat.set_shader_parameter("noise_seed", randf() * 100.0)
 		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)

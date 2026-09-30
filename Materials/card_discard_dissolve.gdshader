@@ -6,6 +6,8 @@ uniform vec4 edge_color : source_color = vec4(1.0, 0.5, 0.0, 1.0);
 uniform float gradient_weight : hint_range(0.0, 1.0) = 0.5;
 uniform float noise_seed = 0.0;  // randomised per card from GDScript
 uniform float gray_amount : hint_range(0.0, 1.0) = 0.0;  // 0 = normal, 1 = unaffordable dim
+uniform float stun_amount : hint_range(0.0, 1.0) = 0.0;  // 0 = normal, 1 = fully stunned (purple tint)
+uniform vec4 stun_color : source_color = vec4(0.61, 0.3, 1.0, 1.0);
 
 float hash(vec2 p) {
 	p += noise_seed;
@@ -41,5 +43,13 @@ void fragment() {
 	final_color += edge_color.rgb * 1.5 * edge_factor * edge_factor;
 
 	final_color *= mix(1.0, 0.5, gray_amount);
+
+	// Stun: desaturate toward a pulsing purple tint
+	if (stun_amount > 0.0) {
+		float luma = dot(final_color, vec3(0.299, 0.587, 0.114));
+		float pulse = 0.85 + 0.15 * sin(TIME * 4.0);
+		vec3 tinted = luma * stun_color.rgb * 1.7 * pulse;
+		final_color = mix(final_color, tinted, stun_amount * 0.7);
+	}
 	COLOR = vec4(final_color, original.a);
 }

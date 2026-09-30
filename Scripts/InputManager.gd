@@ -40,6 +40,30 @@ func _input(event):
 		if event.pressed:
 			_handle_right_click()
 
+	elif OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_F9:
+		_debug_toggle_stun_at_cursor()
+
+
+func _debug_toggle_stun_at_cursor() -> void:
+	"""Debug builds only: F9 toggles the Stun visual on the card under the cursor.
+	Visual-only — does not register the stun with StunManager."""
+	var card = _get_in_play_card_at_cursor()
+	if card == null:
+		var parameters = PhysicsPointQueryParameters2D.new()
+		parameters.position = get_global_mouse_position()
+		parameters.collide_with_areas = true
+		parameters.collision_mask = COLLISION_MASK_CARD
+		var result = get_world_2d().direct_space_state.intersect_point(parameters)
+		if result.size() > 0:
+			card = _get_card_with_highest_z(result)
+	if card == null or not card.has_method("_set_stun_visual"):
+		return
+	if "Stun" in card.runtime_keywords:
+		card.remove_runtime_keyword("Stun")
+	else:
+		card.add_runtime_keyword("Stun")
+
 func raycast_at_cursor():
 	var space_state = get_world_2d().direct_space_state
 	var parameters = PhysicsPointQueryParameters2D.new()
