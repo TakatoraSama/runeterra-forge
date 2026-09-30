@@ -69,6 +69,7 @@ func on_round_start() -> void:
 func reset() -> void:
 	"""Clear bot match state. Called by GameManager.start_game() for each new match.
 	Does NOT touch bot_enabled: LobbyUI sets that flag before start_game() runs."""
+	_bot_deck_remaining.clear()
 	_bot_hand.clear()
 	_bot_hand_cost_mod.clear()
 	_card_manager = null
@@ -104,6 +105,7 @@ func _bot_card_cost(hand_index: int) -> int:
 		return 0
 	var discount: int = _bot_hand_cost_mod[hand_index] if hand_index < _bot_hand_cost_mod.size() else 0
 	return maxi(0, int(data.get("Cost", 0)) - discount)
+
 
 func _decide_bot_play() -> void:
 	"""Pick a random affordable card from hand and queue it to a random open column.

@@ -647,7 +647,6 @@ func _ability_mana_ramp(card: Node) -> void:
 		print("%s grants +%d mana next turn" % [card_data.get("Name", ""), bonus_amount])
 
 
-
 func _ability_recall_allies_same_lane(card: Node) -> void:
 	"""NavoriConspirator {Play}: recall all other allied Champions/Followers in this lane.
 	Only runs on the card owner's client — the opponent is notified via RPC inside recall_card."""

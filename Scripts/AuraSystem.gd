@@ -133,7 +133,6 @@ func _apply_aura_azir(azir_card: Node, zone_key: Vector2i) -> void:
 			ally.aura_power_modifier += aura_amount
 
 
-
 func _is_back_row(board: Node, zone_key: Vector2i, card: Node) -> bool:
 	"""Single definition of "back row": slot index 2 or 3 within its own zone
 	(indices 0-1 are the front row). Used by the Xerath lv2 and lv3 auras."""
