@@ -17,7 +17,7 @@ Where the card text and the code disagree, **the code is the source of truth**.
 |---|---|---|---|---|
 | **0. Upgrade to Godot 4.7** | ✅ **Done**: Godot 4.7.2, commit `63570fe` on `upgrade/godot-4.7`. No regressions vs the 4.6 baseline. Manual GUI smoke test + Windows export still pending | Engine migration (§0) | Low risk. All later work (particles, shaders, new scenes) is built on the target version | S |
 | **1. Critical fixes (cheap ones only)** | ✅ **Done**: commit `088f423` (branch `fix/phase-1-critical`, merged into `upgrade/godot-4.7`). `tools/lan_selftest.sh` passes (and fails with the old seed formula). Manual GUI check (F9 Stun, spell badge) + a LAN match with real plays still pending | Seed fix, cosmetic RNG split, per-match reset of singletons, keyword badge path bug (§1.1 a+d, §1.6), plus a found bug: `CardSpell.tscn` had no script attached. Adds debug-only auto-connect flags (`--autohost`, `--autojoin=<ip>`, `--autoendturn`, `--quit-on-end`), `[SYNC]` log lines, and `tools/lan_selftest.sh` to test LAN sync unattended | Correctness first. The other desync fixes (§1.1 b, c, e) are **superseded by Phase 3**, so don't hand-write mirror RPCs | S |
-| **2. Quick wins** | Planned | Saved decks used in matches, text/code mismatches, undo tracker, MiniCard SubViewport warning (§1.2, §1.5, §1.6) | Small, visible improvements for players | S |
+| **2. Quick wins** | ✅ **Done**: branch `phase2/integration` (merged into `upgrade/godot-4.7`). Offline smoke x3 + `tools/lan_selftest.sh` x2 pass. Manual GUI check (Deck Builder save/restart/load, Xerath2/Janna2/Rumble2 in a match, undo, recall+Stun, MiniCard sizing) + a LAN match with real plays still pending | Saved decks used in matches, text/code mismatches, undo tracker, MiniCard SubViewport warning (§1.2, §1.5, §1.6). Shipped: saved decks reach a match (§1.2), with the active deck persisted in `user://active_deck.json` and Deck Builder *load* setting the active deck; §1.5 fixed against the card text — **Xerath2 back-row only**, **Janna2 passive applies to every draw including bot draws**, **Rumble2 grants the Augment badge**, plus the Ice Pillar mana ramp. Extras found while in there: recall clears Stun, undo restores hand glow and drops stale `summoned_cards`, MiniCard sizing warning gone, Augment sprite path fixed | Small, visible improvements for players | S |
 | **3. Multiplayer rework: host runs the rules** | Planned | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
 | **4. VFX foundation + status effects** | Planned (Stun ✅ shipped) | Generalise the Stun pattern. Elusive float, Deep glow (§2.1, §2.2) | Reuses shipped code. Status effects read card state, so they can start during Phase 3 | M |
 | **5. Event effects** | Planned | Play/flip, kill, discard, recall, create, summon, swap, lane reveal, Sun Disc (§2.3), each as a handler for one event type | One presenter handler per event (Phase 3) | M |
@@ -103,7 +103,8 @@ Both clients simulate resolve locally. Every random pick must use the **same see
 `Deck.gd` `player_deck` is a hardcoded list of 12 cards, and the Deck Builder saves decks that never reach a match.
 
 **Fix:** in `Deck._ready`, build `player_deck` from `DeckManager.get_active_deck()` (`{"id": id, "cost_mod": 0}` per entry). Fall back to the current list if it's empty.
-**Optional:** a deck picker in the Lobby, and letting the bot use a saved deck.
+**Status: done (Phase 2).** The active deck name is persisted in `user://active_deck.json` (kept out of `decks.json` so every key there stays a deck), loading a deck in the Deck Builder sets it active, and unknown card ids are skipped with a warning, falling back to the old hardcoded list.
+**Optional, not done:** a deck picker in the Lobby, and letting the bot use a saved deck.
 
 ### 1.3 Cards with no implemented ability (Phase 7)
 
@@ -140,11 +141,11 @@ Decide which one is right, then fix the other:
 
 | Card | Text says | Code does | Where |
 |---|---|---|---|
-| Xerath2 | Back-row enemies here get −1 | **All** enemies in the opposing lane get −1 | `AuraSystem._apply_aura_xerath_lv2` |
-| Ice Pillar | +`{mana_bonus}` mana (5) | Hardcoded `5`, ignoring `BalanceValues` | `AbilityResolver._ability_mana_ramp` |
-| Rumble2 | Created cards get Augment | No Augment granted | `_ability_level_up_create_from_discards` |
-| Janna2 | "When you draw a card, reduce its cost" | Only reduces cards Janna2 draws herself | `_ability_janna_draw_cost_reduce` |
-| Azir3, Xerath3 | Barrier | Keyword not implemented | §1.4 |
+| Xerath2 | Back-row enemies here get −1 | ✅ **back-row only** — code now matches text | `AuraSystem._apply_aura_xerath_lv2` |
+| Ice Pillar | +`{mana_bonus}` mana (5) | ✅ reads `BalanceValues` — code now matches text | `AbilityResolver._ability_mana_ramp` |
+| Rumble2 | Created cards get Augment | ✅ grants the Augment badge — code now matches text | `_ability_level_up_create_from_discards` |
+| Janna2 | "When you draw a card, reduce its cost" | ✅ every card its owner draws, bot draws included — code now matches text | `_ability_janna_draw_cost_reduce` |
+| Azir3, Xerath3 | Barrier | Keyword not implemented — **still Phase 7** | §1.4 |
 
 ### 1.6 Bugs and quirks
 
@@ -153,10 +154,19 @@ Decide which one is right, then fix the other:
 | Adding a runtime keyword (e.g. Stun) to a **spell or landmark** errors: the badge sprite is looked up at the root, but it lives at `HBoxContainer/SpriteMargin/KeywordSprite` | `CardSpell._refresh_keyword_display`, `CardLandmark._refresh_keyword_display` | Copy the `Card.gd` version, or move one shared badge builder into `CardDatabase` | 1 ✅ (shared `CardDatabase.fill_keyword_container`) |
 | Spell cards were instantiated **without their script**: in `CardSpell.tscn`, `script = ExtResource(...)` had been merged into the node header, where Godot ignores it. It only worked because `Deck.draw_card` / `CardManager` re-attach it with `set_script()` | `Scenes/CardSpell.tscn` root node | Move `script = …` to its own property line (the `set_script()` fallbacks stay as harmless safety nets) | 1 ✅ |
 | Autoload singletons are never reset. A second match in one session keeps old stuns, swap history, lane state and bot hand | `StunManager` (has `reset()`, never called), `SwapLaneManager`, `LaneManager`, `BotManager` | Add `reset()` to each and call them from `GameManager.start_game()` | 1 |
-| Undo returns cards but leaves their `summoned_cards` entries, which can count toward Azir, Irelia, Kennen and Sion level-ups | `CardManager._on_undo_button_pressed` | Remove the matching unresolved entries (`was_played_from_hand && !is_resolved`) | 2 |
-| Recalled stunned card stays tinted in hand until the next resolve | `StunManager.on_resolve_start` / `CardManager.recall_card` | Decide the rule. If recall should clear stun, remove the entry in `recall_card` | 2 |
-| Engine warning in Card Catalog and Deck Builder: "Can't change the size of a `SubViewport` with a `SubViewportContainer` parent that has `stretch` enabled" (31× per screen; pre-existing, also on 4.6) | `MiniCard.gd:71` `set_display_size` sets `vp.size` while the container has `stretch = true` | Drop the manual `vp.size` assignment (stretch already sizes it), or set `stretch = false` and keep sizing manually | 2 |
+| Undo returns cards but leaves their `summoned_cards` entries, which can count toward Azir, Irelia, Kennen and Sion level-ups | `CardManager._on_undo_button_pressed` | Remove the matching unresolved entries (`was_played_from_hand && !is_resolved`) | 2 ✅ |
+| Recalled stunned card stays tinted in hand until the next resolve | `StunManager.on_resolve_start` / `CardManager.recall_card` | Decide the rule. If recall should clear stun, remove the entry in `recall_card` | 2 ✅ |
+| Engine warning in Card Catalog and Deck Builder: "Can't change the size of a `SubViewport` with a `SubViewportContainer` parent that has `stretch` enabled" (31× per screen; pre-existing, also on 4.6) | `MiniCard.gd:71` `set_display_size` sets `vp.size` while the container has `stretch = true` | Drop the manual `vp.size` assignment (stretch already sizes it), or set `stretch = false` and keep sizing manually | 2 ✅ |
 | Unused code: `NetworkManager.local_zone_to_network` / `network_zone_to_local` / `is_local_action`, `get_beheld_cards_filtered`, `count_beheld_matching`, `card_glow_outline.gdshader`, `card_flash.tres`, `VocabDatabase` | various | Keep what future features need (glow shader → VFX, Vocab → tooltips) and delete the rest | any |
+
+### Found during Phase 2 (follow-ups)
+
+- **The documented headless smoke test never leaves the lobby.** `--headless … res://Scenes/Main.tscn -- --autoendturn --quit-on-end` hangs at the lobby, because `GameManager._ready()` does not auto-start and `LobbyUI` only starts on Host/Join/Offline. Fix: add a permanent debug-only `--autooffline` dev arg to `LobbyUI._parse_dev_args()` (same shape as the existing `--autohost`) and update the documented command.
+- **`tools/lan_selftest.sh` needs two workarounds on Windows.** `timeout` resolves to `C:\WINDOWS\system32\timeout.exe` instead of GNU coreutils, so Git's `usr\bin` has to come first on `PATH`; and the script must be launched with `sh` (direct execution fails with `%1 is not a valid Win32 application`, and `bash` silently drops the `G47` environment variable). The script's `G47` default is unchanged.
+- **`lan_selftest.sh` never plays a card.** Both peers auto-end every turn, so lanes stay `[0,0,0]`; the test covers turn/lane/seed sync but not card-play sync. It needs a scripted play sequence (or a pair with one) to cover that.
+- **`summoned_cards` entries keep the lv1 `card_id`.** After Azir or Irelia level up, their own entry is no longer excluded from the level-up count and ends up counting toward themselves.
+- **Azir/Irelia/Kennen/Trundle level-up checks don't filter on `is_resolved`** (Sion's does). Latent today, but worth aligning before Phase 3 moves this logic into a rules engine.
+- **Each LAN peer plays its own locally active deck.** Nothing syncs the deck, so two players with different active decks play different decks. Deck sync belongs in Phase 3 along with the rest of the match state.
 
 ### 1.7 Suggested fix order
 
