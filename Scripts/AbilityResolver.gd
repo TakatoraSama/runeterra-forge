@@ -640,11 +640,12 @@ func _ability_mana_ramp(card: Node) -> void:
 	if not card_data:
 		return
 
-	var bonus_amount := 5  # default; can be made data-driven via BalanceValues
+	var bonus_amount: int = int(card_data.get("BalanceValues", {}).get("mana_bonus", 5))
 	var gm := _get_game_manager()
 	if gm and gm.has_method("add_temp_bonus_mana"):
 		gm.add_temp_bonus_mana(card.owner_player_id, bonus_amount)
 		print("%s grants +%d mana next turn" % [card_data.get("Name", ""), bonus_amount])
+
 
 
 func _ability_recall_allies_same_lane(card: Node) -> void:
@@ -852,6 +853,10 @@ func _ability_level_up_create_from_discards(card: Node) -> void:
 		# create_card_in_hand inserts at index 0 — grab it immediately
 		var new_card = cm.player_hand_reference.player_hand[0]
 		cm.adjust_cost([new_card], -1)
+		# Rumble2: created cards are Augmented (badge only until Phase 7 lands the keyword).
+		# add_runtime_keyword is keyword-specific — only "Stun" has a side effect.
+		if new_card.has_method("add_runtime_keyword"):
+			new_card.add_runtime_keyword("Augment")
 		created_count += 1
 		print("%s level-up: created %s (cost %d → %d)" % [
 			card_name, picked_id, base_cost, new_card.get_current_cost()])
@@ -1702,27 +1707,61 @@ func _ability_janna_updraft_draw(card: Node) -> void:
 
 
 func _ability_janna_draw_cost_reduce(card: Node) -> void:
-	"""Janna2 Play/Round Start: Draw draw_threshold cards and reduce each drawn card's cost."""
+	"""Janna2 Play/Round Start: Draw draw_threshold cards.
+	The cost reduction is NOT applied here — the Janna2 passive
+	(apply_janna_draw_cost_reduce, called from the draw paths) already discounts
+	every card its owner draws, including these ones."""
 	if card.owner_player_id != 1:
 		return
 	var balance: Dictionary = CardDatabase.CARDS[card.card_id].get("BalanceValues", {})
 	var draw_threshold: int = int(balance.get("draw_threshold", 1))
-	var cost_reduction: int = int(balance.get("cost_reduction", 1))
-	var cm = get_node_or_null("/root/Main/CardManager")
-	var player_hand = get_node_or_null("/root/Main/PlayerHand")
 	var deck = get_node_or_null("/root/Main/Deck")
-	if not cm or not player_hand or not deck:
+	if not deck:
 		return
-	# Snapshot hand before draw to identify newly drawn cards
-	var hand_before: Array = player_hand.player_hand.duplicate()
 	deck.draw_cards(draw_threshold)
-	var new_cards: Array = []
-	for hand_card in player_hand.player_hand:
-		if hand_card not in hand_before:
-			new_cards.append(hand_card)
-	if not new_cards.is_empty():
-		cm.adjust_cost(new_cards, -cost_reduction)
 	await LevelUpManager.check_level_ups_after_draw()
+
+
+func get_janna_draw_cost_reduction(owner_player_id: int) -> int:
+	"""Total cost reduction every card this owner draws gets while a RESOLVED
+	Janna lv2 sits on their board (its passive: "When you draw a card, reduce its
+	cost by {cost_reduction}"). Stacks — each Janna2 on board contributes its own
+	cost_reduction. Single source of truth for the discount; the draw paths call
+	apply_janna_draw_cost_reduce()."""
+	var cm := _get_card_manager()
+	if not cm:
+		return 0
+	var reduction := 0
+	for card in cm.all_cards_in_play_order:
+		if not is_instance_valid(card) or not card.is_resolved:
+			continue
+		if not card.card_slot_is_in:  # card removed from the board
+			continue
+		if card.owner_player_id != owner_player_id:
+			continue
+		var card_data = CardDatabase.CARDS.get(card.card_id)
+		if not card_data or card_data.get("AbilityType", "") != "janna_draw_cost_reduce":
+			continue
+		reduction += int(card_data.get("BalanceValues", {}).get("cost_reduction", 1))
+	return reduction
+
+
+func apply_janna_draw_cost_reduce(drawn_card: Node) -> void:
+	"""Janna lv2 passive: discount a single card its owner just drew.
+	Called from every draw path (Deck.draw_card, Deck.draw_specific_cards and
+	BotManager._draw_bot_cards). Creating a card is not drawing, so
+	create_card_in_hand deliberately does not go through here."""
+	if not is_instance_valid(drawn_card):
+		return
+	var reduction: int = get_janna_draw_cost_reduction(drawn_card.owner_player_id)
+	if reduction <= 0:
+		return
+	var cm := _get_card_manager()
+	if not cm:
+		return
+	cm.adjust_cost([drawn_card], -reduction)
+	print("Janna2 passive: drawn card %s (player %d) reduced by %d" % [
+		drawn_card.card_id, drawn_card.owner_player_id, reduction])
 
 
 # ─── Sea Monster abilities ─────────────────────────────────────────────────────

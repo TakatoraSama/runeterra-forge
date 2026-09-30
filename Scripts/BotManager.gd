@@ -22,6 +22,7 @@ const BOT_DECK: Array[String] = [
 
 var _bot_deck_remaining: Array = []
 var _bot_hand: Array = []       # Array of card_id Strings
+var _bot_hand_cost_mod: Array = []  # Janna lv2 draw discount per _bot_hand slot (index-aligned)
 var _card_manager: Node = null
 var _game_manager: Node = null
 
@@ -37,6 +38,7 @@ func setup_bot(initial_draw_count: int) -> void:
 	_game_manager = get_node_or_null("/root/Main/GameManager")
 
 	_bot_hand.clear()
+	_bot_hand_cost_mod.clear()
 	_bot_deck_remaining = BOT_DECK.duplicate()
 	_bot_deck_remaining.shuffle()
 
@@ -67,8 +69,8 @@ func on_round_start() -> void:
 func reset() -> void:
 	"""Clear bot match state. Called by GameManager.start_game() for each new match.
 	Does NOT touch bot_enabled: LobbyUI sets that flag before start_game() runs."""
-	_bot_deck_remaining.clear()
 	_bot_hand.clear()
+	_bot_hand_cost_mod.clear()
 	_card_manager = null
 	_game_manager = null
 	print("BotManager: reset — bot state cleared.")
@@ -83,12 +85,25 @@ func _draw_bot_cards(count: int) -> void:
 		if _bot_deck_remaining.is_empty():
 			print("BotManager: Deck empty, cannot draw.")
 			break
-		_bot_hand.append(_bot_deck_remaining.pop_front())
+		var drawn_id: String = _bot_deck_remaining.pop_front()
+		_bot_hand.append(drawn_id)
+		# Janna lv2 passive: the bot's hand holds card IDs, not card nodes, so the
+		# draw discount is recorded per slot and spent in _decide_bot_play().
+		_bot_hand_cost_mod.append(AbilityResolver.get_janna_draw_cost_reduction(0))
 	print("BotManager: Drew %d card(s). Hand size: %d" % [count, _bot_hand.size()])
 	# Check Deep: if the bot's deck is now empty, mark player 0 as Deep
 	if _bot_deck_remaining.is_empty() and _card_manager and _card_manager.has_method("set_player_deep"):
 		_card_manager.set_player_deep(0)
 
+
+func _bot_card_cost(hand_index: int) -> int:
+	"""Effective cost of a bot hand slot: base cost minus the Janna lv2 draw
+	discount that was active when the card was drawn. Never below 0."""
+	var data = CardDatabase.CARDS.get(str(_bot_hand[hand_index]))
+	if not data:
+		return 0
+	var discount: int = _bot_hand_cost_mod[hand_index] if hand_index < _bot_hand_cost_mod.size() else 0
+	return maxi(0, int(data.get("Cost", 0)) - discount)
 
 func _decide_bot_play() -> void:
 	"""Pick a random affordable card from hand and queue it to a random open column.
@@ -102,14 +117,13 @@ func _decide_bot_play() -> void:
 
 	var current_mana: int = _game_manager.get_player_current_mana(0)
 
-	# Collect cards the bot can afford
+	# Collect the hand slots whose (possibly discounted) cost the bot can afford
 	var playable: Array = []
-	for card_id in _bot_hand:
-		var data = CardDatabase.CARDS.get(str(card_id))
-		if data:
-			var cost: int = data.get("Cost", 0)
-			if cost <= current_mana:
-				playable.append(card_id)
+	for i in range(_bot_hand.size()):
+		if not CardDatabase.CARDS.has(str(_bot_hand[i])):
+			continue
+		if _bot_card_cost(i) <= current_mana:
+			playable.append(i)
 
 	if playable.is_empty():
 		print("BotManager: No affordable cards. Mana: %d, Hand: %s" % [current_mana, str(_bot_hand)])
@@ -131,17 +145,18 @@ func _decide_bot_play() -> void:
 		return
 
 	# Pick randomly
-	var chosen: String = playable[randi() % playable.size()]
+	var chosen_index: int = playable[randi() % playable.size()]
+	var chosen: String = str(_bot_hand[chosen_index])
 	var col: int = available_cols[randi() % available_cols.size()]
 
-	var chosen_data = CardDatabase.CARDS.get(str(chosen))
-	var chosen_cost: int = chosen_data.get("Cost", 0) if chosen_data else 0
+	var chosen_cost: int = _bot_card_cost(chosen_index)
 
 	# Spend mana and queue the play. _receive_opponent_card_play() appends to
 	# _pending_opponent_cards; the card is spawned face-down at RESOLVE start
 	# and flips + fires on_summon() exactly like a real opponent's card.
 	_game_manager.spend_player_mana(0, chosen_cost)
-	_bot_hand.erase(chosen)
+	_bot_hand.remove_at(chosen_index)
+	_bot_hand_cost_mod.remove_at(chosen_index)
 	_card_manager._receive_opponent_card_play(chosen, col, 0)
 
 	print("BotManager: Queued '%s' (cost %d) to column %d" % [chosen, chosen_cost, col])
