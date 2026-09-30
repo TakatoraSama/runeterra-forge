@@ -12,6 +12,14 @@ var _revealed: Array = [false, false, false]
 var _noxkraya_active: bool = false
 var _noxkraya_col: int = -1
 
+# Separate RNG for lane effects that only run on one client (Sunken Temple picks
+# a card from the local player's own hand). Using the global seeded randi() there
+# would advance it on one side only and desync subsequent shared random picks.
+var _local_rng := RandomNumberGenerator.new()
+
+func _ready() -> void:
+	_local_rng.randomize()
+
 
 # ── Scene-tree helpers ─────────────────────────────────────────────────────────
 
@@ -90,6 +98,15 @@ func is_placement_restricted(zone_key: Vector2i) -> bool:
 	if not _noxkraya_active:
 		return false
 	return zone_key.x != _noxkraya_col
+
+
+func reset() -> void:
+	"""Clear lane state. Called by GameManager.start_game() for each new match."""
+	_lane_ids = []
+	_revealed = [false, false, false]
+	_noxkraya_active = false
+	_noxkraya_col = -1
+	print("LaneManager: reset — lane state cleared.")
 
 
 # ── Private: reveal ────────────────────────────────────────────────────────────
@@ -233,12 +250,12 @@ func _activate_sunken_temple(col: int) -> void:
 	if player_hand and player_hand.get("player_hand") != null:
 		var hand_cards: Array = player_hand.player_hand
 		if hand_cards.size() > 0:
-			var rand_idx := randi() % hand_cards.size()
+			var rand_idx := _local_rng.randi() % hand_cards.size()
 			var card_to_shuffle = hand_cards[rand_idx]
 			if is_instance_valid(card_to_shuffle):
 				var shuffled_id: String = card_to_shuffle.card_id
 				# Add card back to deck as dict with preserved cost_mod (shuffle feel)
-				var insert_pos = randi() % (deck.player_deck.size() + 1)
+				var insert_pos: int = _local_rng.randi_range(0, deck.player_deck.size())
 				deck.player_deck.insert(insert_pos, {"id": shuffled_id, "cost_mod": card_to_shuffle.cost_modifier})
 				# Remove from hand and free the scene node
 				if player_hand.has_method("remove_card_from_hand"):

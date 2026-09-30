@@ -64,6 +64,16 @@ func on_round_start() -> void:
 	_decide_bot_play()
 
 
+func reset() -> void:
+	"""Clear bot match state. Called by GameManager.start_game() for each new match.
+	Does NOT touch bot_enabled: LobbyUI sets that flag before start_game() runs."""
+	_bot_deck_remaining.clear()
+	_bot_hand.clear()
+	_card_manager = null
+	_game_manager = null
+	print("BotManager: reset — bot state cleared.")
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

@@ -1430,19 +1430,33 @@ static func _apply_region_visual(card: Node, card_data: Dictionary, is_spell: bo
 		region_sprite_node_2.visible = false
 
 
-static func _apply_keyword_visual(card: Node, card_data: Dictionary) -> void:
-	var keywords: Array = card_data.get("Keyword", [])
-	var keyword_container = card.get_node_or_null("CardFront/TextContainer/KeywordContainer")
-	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
+static var _cosmetic_rng: RandomNumberGenerator = null
 
-	if keyword_container:
-		for child in keyword_container.get_children():
-			child.queue_free()
-	if keywords.size() == 0:
-		keyword_container.visible = false
+
+static func cosmetic_randf() -> float:
+	"""Returns a random float for visual-only randomness (dissolve noise seeds, ...).
+	Uses a dedicated RNG so cosmetics never advance the global random stream, which
+	is seeded identically on both clients during resolve to pick shared random targets."""
+	if _cosmetic_rng == null:
+		_cosmetic_rng = RandomNumberGenerator.new()
+		_cosmetic_rng.randomize()
+	return _cosmetic_rng.randf()
+
+
+static func fill_keyword_container(container: Node, keywords: Array) -> void:
+	"""Rebuild the keyword badge row inside container from a list of keyword names.
+	Shared by populate_card_visuals() and the per-card runtime keyword refresh so
+	Unit, Spell and Landmark cards all build their badges the same way."""
+	if container == null:
 		return
-	keyword_container.visible = true
+	for child in container.get_children():
+		child.queue_free()
+	if keywords.size() == 0:
+		container.visible = false
+		return
+	container.visible = true
 	var show_name := keywords.size() < 3
+	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
 	for keyword in keywords:
 		var item = keyword_item_scene.instantiate()
 		var keyword_sprite_path = "res://Assets/KeywordSprites/" + str(keyword) + ".webp"
@@ -1451,7 +1465,12 @@ static func _apply_keyword_visual(card: Node, card_data: Dictionary) -> void:
 			item.get_node("HBoxContainer/KeywordName").text = keyword
 		else:
 			item.get_node("HBoxContainer/KeywordName").visible = false
-		keyword_container.add_child(item)
+		container.add_child(item)
+
+
+static func _apply_keyword_visual(card: Node, card_data: Dictionary) -> void:
+	fill_keyword_container(card.get_node_or_null("CardFront/TextContainer/KeywordContainer"),
+		card_data.get("Keyword", []))
 
 
 static func format_card_text(text: String, balance_values: Dictionary = {}) -> String:

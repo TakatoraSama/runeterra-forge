@@ -451,8 +451,9 @@ _data = {
 &"card_levelup_spin": SubResource("Animation_6elyo")
 }
 
-[node name="CardSpell" type="Node2D" unique_id=850268766 script = ExtResource("1_cardspell")]
+[node name="CardSpell" type="Node2D" unique_id=850268766]
 scale = Vector2(0.2, 0.2)
+script = ExtResource("1_cardspell")
 
 [node name="Area2D" type="Area2D" parent="." unique_id=1813648687]
 visible = false

@@ -21,7 +21,7 @@ var SWAP_DURATION = 1  # seconds for the tween animation of each swap
 ## Pending swaps for the current round. Cleared after execute_swaps().
 var pending_swaps: Array = []
 
-## Permanent swap history (append-only, never cleared).
+## Permanent swap history. Cleared between matches by reset().
 ## Entry format: {card_id, owner_player_id, swapped_by_player_id,
 ##                cause_card_id, from_zone, to_zone, turn_number}
 var swap_history: Array = []
@@ -42,6 +42,16 @@ func _get_card_manager() -> Node:
 
 func _get_board() -> Node:
 	return get_node_or_null("/root/Main/Board")
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+func reset() -> void:
+	"""Clear all swap state. Called by GameManager.start_game() for each new match."""
+	pending_swaps.clear()
+	swap_history.clear()
+	_swap_steps_received = 0
+	print("SwapLaneManager: reset — all swap state cleared.")
 
 
 # ── Query API ─────────────────────────────────────────────────────────────────

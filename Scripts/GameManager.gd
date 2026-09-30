@@ -57,6 +57,7 @@ var round_phase: int = RoundPhase.NONE
 var turn_number: int = 0
 var active_player_id: int = 1
 var flip_first_player_id: int = -1  # Player who acts first during resolve and ability phases
+var flip_first_network_id: int = -1  # Same player as flip_first_player_id, but as a network id (0 = host, 1 = client) — perspective-independent
 
 var _mana_by_player: Dictionary = {}
 var _players_ended_turn: Dictionary = {}  # peer_id -> bool, tracks who hit End Turn
@@ -80,6 +81,12 @@ func _initialize_player_states() -> void:
 
 
 func start_game() -> void:
+	# These autoload singletons outlive a single match — clear their per-match state.
+	StunManager.reset()
+	SwapLaneManager.reset()
+	LaneManager.reset()
+	BotManager.reset()
+
 	game_phase = GamePhase.GAME_START
 	round_phase = RoundPhase.NONE
 	turn_number = 0
@@ -103,6 +110,7 @@ func start_game() -> void:
 	else:
 		# Offline: just pick locally
 		flip_first_player_id = randi_range(0, 1)
+		flip_first_network_id = flip_first_player_id  # Offline: local id == network id
 		_sync_flip_first_to_card_manager()
 		emit_signal("flip_first_changed", flip_first_player_id)
 		print("Flip first assigned to player: ", flip_first_player_id)
@@ -261,7 +269,9 @@ func _proceed_to_resolve() -> void:
 	await _swap_lane_phase()
 
 	_set_round_phase(RoundPhase.RESOLVE)
-	seed(turn_number * 7919 + flip_first_player_id * 1337)  # Sync RNG so both clients pick identical ability targets
+	seed(_shared_seed())  # Sync RNG so both clients pick identical ability targets
+	if OS.is_debug_build():
+		print("[SYNC] turn=%d phase=resolve seed=%d" % [turn_number, _shared_seed()])
 	StunManager.on_resolve_start(turn_number)  # Expire stuns from previous turns
 	await _resolve_phase()
 
@@ -286,6 +296,7 @@ func _proceed_to_resolve() -> void:
 	_update_zone_power_display()
 	
 	# Check lane winners and reassign flip first
+	_log_sync_lanes("round_end")
 	check_lane_winners_and_update_flip_first()
 	
 	start_next_turn()
@@ -332,13 +343,16 @@ func end_game() -> void:
 	_emit_phase()
 
 	# Sync RNG for game-end abilities: both clients share turn_number and
-	# flip_first_player_id (synced via RPC), so this seed is identical on host
+	# flip_first_network_id (synced via RPC), so this seed is identical on host
 	# and client with no extra network call needed.
-	seed(turn_number * 7919 + flip_first_player_id * 1337)
+	seed(_shared_seed())
+	if OS.is_debug_build():
+		print("[SYNC] turn=%d phase=game_end seed=%d" % [turn_number, _shared_seed()])
 
 	# Trigger Game End abilities in play order
 	if card_manager and card_manager.has_method("trigger_game_end_abilities"):
 		await card_manager.trigger_game_end_abilities()
+	_log_sync_lanes("game_end")
 
 	_update_zone_power_display()
 	_show_match_result_text(_determine_match_winner_local())
@@ -449,6 +463,7 @@ func _sync_flip_first(network_player_id: int) -> void:
 	Locally, each player sees themselves as player 1 (bottom).
 	So host maps: network 0 -> local 1 (me), network 1 -> local 0 (opponent).
 	Client maps: network 0 -> local 0 (opponent), network 1 -> local 1 (me)."""
+	flip_first_network_id = network_player_id
 	var local_id: int
 	if _is_online():
 		var my_network_id = network_manager.get_network_player_id()
@@ -461,6 +476,38 @@ func _sync_flip_first(network_player_id: int) -> void:
 	
 	set_flip_first_player_id(local_id)
 	print("Flip first synced: network_id=%d -> local_id=%d" % [network_player_id, local_id])
+
+
+func _shared_seed() -> int:
+	"""RNG seed shared by both peers for the resolve and game-end phases.
+	Built from flip_first_network_id (not flip_first_player_id): the local id is
+	perspective-dependent (each client sees itself as player 1), so host and guest
+	would otherwise derive different seeds and pick different random targets."""
+	return turn_number * 7919 + flip_first_network_id * 1337
+
+
+func _log_sync_lanes(label: String) -> void:
+	"""Debug-only board snapshot used by tools/lan_selftest.sh to compare peers.
+	Prints network player ids (0 = host, 1 = client), never local ones, so the
+	line is byte-identical on both peers while the match is in sync."""
+	if not OS.is_debug_build():
+		return
+	var p0: Array[int] = []
+	var p1: Array[int] = []
+	var my_net: int = network_manager.get_network_player_id() if _is_online() else 0
+	for network_id in range(2):
+		# Online: my row is 1, the opponent's row is 0. Offline: row == network id.
+		var row: int = (1 if network_id == my_net else 0) if _is_online() else network_id
+		var powers: Array[int] = []
+		for col in range(3):
+			powers.append(_get_zone_total_power(Vector2i(col, row)))
+		if network_id == 0:
+			p0 = powers
+		else:
+			p1 = powers
+	print("[SYNC] turn=%d %s lanes p0=[%d,%d,%d] p1=[%d,%d,%d]" % [
+		turn_number, label, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2],
+	])
 
 
 func check_lane_winners_and_update_flip_first() -> void:
@@ -516,6 +563,7 @@ func check_lane_winners_and_update_flip_first() -> void:
 	if _is_online():
 		rpc("_sync_flip_first", winner_network_id)
 	else:
+		flip_first_network_id = winner_network_id
 		set_flip_first_player_id(winner_network_id)
 
 

@@ -141,23 +141,12 @@ func remove_runtime_keyword(keyword_name: String) -> void:
 
 
 func _refresh_keyword_display() -> void:
+	"""Rebuild keyword badges from static card data + runtime_keywords.
+	Delegates to CardDatabase.fill_keyword_container() so the sprite paths match
+	KeywordItem.tscn's nested HBoxContainer/SpriteMargin layout."""
 	var keyword_container = get_node_or_null("CardFront/TextContainer/KeywordContainer")
-	if not keyword_container:
-		return
-	for child in keyword_container.get_children():
-		child.queue_free()
-	var card_data = CardDatabase.CARDS.get(card_id, {})
-	var all_keywords: Array = card_data.get("Keyword", []) + runtime_keywords
-	if all_keywords.size() > 0:
-		keyword_container.visible = true
-		var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
-		for keyword in all_keywords:
-			var item = keyword_item_scene.instantiate()
-			item.get_node("KeywordSprite").texture = ResourceLoader.load(
-				"res://Assets/KeywordSprites/" + str(keyword) + ".webp")
-			keyword_container.add_child(item)
-	else:
-		keyword_container.visible = false
+	var all_keywords: Array = CardDatabase.CARDS.get(card_id, {}).get("Keyword", []) + runtime_keywords
+	CardDatabase.fill_keyword_container(keyword_container, all_keywords)
 
 func _perform_level_up(new_card_id: String) -> void:
 	var new_data = CardDatabase.CARDS.get(new_card_id)
@@ -175,7 +164,7 @@ func _perform_level_up(new_card_id: String) -> void:
 func play_discard_dissolve(duration: float = 0.8) -> void:
 	hide_card_back()
 	if _dissolve_mat:
-		_dissolve_mat.set_shader_parameter("noise_seed", randf() * 100.0)
+		_dissolve_mat.set_shader_parameter("noise_seed", CardDatabase.cosmetic_randf() * 100.0)
 		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		tween.tween_method(func(val: float): _dissolve_mat.set_shader_parameter("dissolve_amount", val), 0.0, 1.0, duration)
 		tween.parallel().tween_property(self, "modulate:a", 0.0, duration)

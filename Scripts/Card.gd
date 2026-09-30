@@ -472,35 +472,17 @@ func _hide_stun_symbol(duration: float) -> void:
 
 func _refresh_keyword_display() -> void:
 	"""Rebuild keyword sprites from static card data + runtime_keywords.
-	Mirrors CardDatabase.populate_card_visuals() keyword block so display is consistent."""
+	Delegates to CardDatabase.fill_keyword_container() so display stays consistent
+	with populate_card_visuals() on every card type."""
 	var keyword_container = get_node_or_null("CardFront/TextContainer/KeywordContainer")
-	if not keyword_container:
-		return
-	for child in keyword_container.get_children():
-		child.queue_free()
-	var card_data = CardDatabase.CARDS.get(card_id, {})
-	var all_keywords: Array = card_data.get("Keyword", []) + runtime_keywords
-	if all_keywords.size() == 0:
-		keyword_container.visible = false
-		return
-	keyword_container.visible = true
-	var show_name := all_keywords.size() < 3
-	var keyword_item_scene = preload("res://Scenes/KeywordItem.tscn")
-	for keyword in all_keywords:
-		var item = keyword_item_scene.instantiate()
-		item.get_node("HBoxContainer/SpriteMargin/KeywordSprite").texture = ResourceLoader.load(
-			"res://Assets/KeywordSprites/" + str(keyword) + ".webp")
-		if show_name:
-			item.get_node("HBoxContainer/KeywordName").text = keyword
-		else:
-			item.get_node("HBoxContainer/KeywordName").visible = false
-		keyword_container.add_child(item)
+	var all_keywords: Array = CardDatabase.CARDS.get(card_id, {}).get("Keyword", []) + runtime_keywords
+	CardDatabase.fill_keyword_container(keyword_container, all_keywords)
 
 func play_discard_dissolve(duration: float = 0.8) -> void:
 	hide_card_back()
 	_hide_stun_symbol(duration)
 	if _dissolve_mat:
-		_dissolve_mat.set_shader_parameter("noise_seed", randf() * 100.0)
+		_dissolve_mat.set_shader_parameter("noise_seed", CardDatabase.cosmetic_randf() * 100.0)
 		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		tween.tween_method(func(val: float): _dissolve_mat.set_shader_parameter("dissolve_amount", val), 0.0, 1.0, duration)
 		tween.parallel().tween_property(self, "modulate:a", 0.0, duration)
