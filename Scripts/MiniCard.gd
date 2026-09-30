@@ -63,12 +63,14 @@ func set_in_deck(value: bool) -> void:
 
 func set_display_size(w: int, h: int) -> void:
 	custom_minimum_size = Vector2(w, h)
-	if _viewport_container == null:
-		return
-	var vp := _viewport_container.get_child(0) as SubViewport
-	if vp == null:
-		return
-	vp.size = Vector2i(w, h)
+	# No manual SubViewport resize: the container has stretch = true, so it already
+	# sizes the viewport from its own rect (FULL_RECT inside this Control, whose
+	# size is custom_minimum_size / the grid cell). Assigning vp.size while the
+	# stretched container is the parent logs "Can't change the size of a SubViewport
+	# with a SubViewportContainer parent that has stretch enabled" and is
+	# overwritten by the container on the next layout pass anyway.
+	# The card is centred in the (w, h) viewport: callers always pass the 126:176
+	# card aspect, so the scaled art fills it exactly.
 	if _card_node:
 		var scale_factor: float = float(w) / float(CARD_W)
 		_card_node.scale = Vector2(0.2 * scale_factor, 0.2 * scale_factor)

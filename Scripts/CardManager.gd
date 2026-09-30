@@ -411,6 +411,32 @@ func _update_undo_button() -> void:
 	undo_button.disabled = undo_stack.is_empty() or not in_play_phase
 
 
+func _remove_undone_summoned_entry(card) -> void:
+	"""Undo the summoned_cards entry that finish_drag's track_summoned_card(card, true)
+	created for a card that is going back to hand.
+	Played-from-hand entries start unresolved and only flip to resolved during the
+	resolve phase, so an undone play can never own a resolved entry. Only the local
+	player's entries are ours to drop — the opponent's live on their own client.
+	Duplicates: removes exactly one entry per call, so playing the same card_id twice
+	and undoing twice removes exactly two entries."""
+	if not is_instance_valid(card):
+		return
+	for i in range(summoned_cards.size() - 1, -1, -1):
+		var entry: Dictionary = summoned_cards[i]
+		if not entry.get("was_played_from_hand", false):
+			continue
+		if entry.get("is_resolved", false):
+			continue
+		if str(entry.get("card_id", "")) != str(card.card_id):
+			continue
+		if int(entry.get("owner_player_id", -1)) != current_player_id:
+			continue
+		summoned_cards.remove_at(i)
+		print("Undo: dropped summoned_cards entry for %s (total: %d)" % [
+			card.card_id, summoned_cards.size()])
+		return
+
+
 func _on_undo_button_pressed() -> void:
 	if undo_stack.is_empty():
 		return
@@ -419,6 +445,8 @@ func _on_undo_button_pressed() -> void:
 	var total_mana_refund: int = 0
 	for entry in undo_stack:
 		total_mana_refund += int(entry.get("mana_cost", 0))
+
+	var undone_cards: Array = []
 
 	# Remove all played cards from board and tracking
 	for entry in undo_stack:
@@ -436,6 +464,9 @@ func _on_undo_button_pressed() -> void:
 		card.z_index = 2
 		card.get_node("Area2D/CollisionShape2D").disabled = false
 		card.is_in_hand = true
+		undone_cards.append(card)
+		# finish_drag() called track_summoned_card(..., true) — drop that entry again
+		_remove_undone_summoned_entry(card)
 
 	# Re-insert cards into hand at their original indices (ascending order keeps indices correct)
 	var sorted_entries: Array = undo_stack.duplicate()
@@ -453,6 +484,13 @@ func _on_undo_button_pressed() -> void:
 	# Refund mana
 	if game_manager_reference and total_mana_refund > 0:
 		game_manager_reference.refund_player_mana(current_player_id, total_mana_refund)
+
+	# finish_drag() hid the hand glow on play — restore it now that mana is back
+	if game_manager_reference:
+		var refunded_mana: int = game_manager_reference.get_player_current_mana(current_player_id)
+		for card in undone_cards:
+			if is_instance_valid(card) and card.has_method("update_glow"):
+				card.update_glow(refunded_mana)
 
 	# Clear turn tracking
 	played_cards_order.clear()
@@ -546,10 +584,16 @@ func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = 
 	Removes the card from its slot and zone, then animates it flying back to
 	the local player's hand. Only adds to hand when the card belongs to the
 	local player — opponent cards are simply removed from the board (the
-	opponent's client manages their own hand).
+	opponent's client manages their own hand). Recall also clears any Stun on the
+	card (StunManager.clear_stun) before the owner check, on both clients.
 	Reusable for any card ability that recalls an ally (Ahri, future cards…)."""
 	if not is_instance_valid(card):
 		return
+
+	# Recall clears Stun. Must run before the owner check below so both clients drop
+	# the entry: the owner clears it here, the mirror clears it in
+	# _receive_opponent_recall. has_stun gates self-swaps, so the two must agree.
+	StunManager.clear_stun(card)
 
 	# Release slot and remove from zone tracking
 	var zone_key := Vector2i(-1, -1)
@@ -1167,6 +1211,10 @@ func _receive_opponent_recall(card_id: String, zone_col: int, zone_row: int) -> 
 	if not target_card:
 		print("_receive_opponent_recall: '%s' not found in zone %s" % [card_id, str(zone_key)])
 		return
+
+	# Mirror of the recall-clears-stun rule. The node is freed below, so the entry
+	# would otherwise linger until on_resolve_start purges the invalid reference.
+	StunManager.clear_stun(target_card)
 
 	if target_card.card_slot_is_in:
 		target_card.card_slot_is_in.card_in_slot = false
