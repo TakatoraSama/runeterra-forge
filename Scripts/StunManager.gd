@@ -54,11 +54,16 @@ func clear_stun(card: Node) -> void:
 			_stun_entries.remove_at(i)
 			found = true
 			break
-	card.remove_runtime_keyword("Stun")
+	# Card.gd / CardSpell.gd / CardLandmark.gd are three independent scripts (all
+	# `extends Node2D`, none inherits from the others) and each defines its own
+	# remove_runtime_keyword. Only Card.gd's version also runs _set_stun_visual(false);
+	# Spells and Landmarks have no Stun visual. Guard anyway — recall_card takes any
+	# board card, and a scene with a different script would crash on a bare call.
+	if card.has_method("remove_runtime_keyword"):
+		card.remove_runtime_keyword("Stun")
 	if found:
 		print("StunManager: Stun cleared on %s (recall, total stunned: %d)" % [
 			card.card_id, _stun_entries.size()])
-
 
 
 func on_resolve_start(current_turn: int) -> void:

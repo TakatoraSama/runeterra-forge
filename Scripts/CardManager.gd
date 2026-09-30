@@ -410,6 +410,7 @@ func _update_undo_button() -> void:
 	)
 	undo_button.disabled = undo_stack.is_empty() or not in_play_phase
 
+
 func _remove_undone_summoned_entry(card) -> void:
 	"""Undo the summoned_cards entry that finish_drag's track_summoned_card(card, true)
 	created for a card that is going back to hand.
@@ -436,10 +437,10 @@ func _remove_undone_summoned_entry(card) -> void:
 		return
 
 
-
 func _on_undo_button_pressed() -> void:
 	if undo_stack.is_empty():
 		return
+
 	# Collect total mana to refund
 	var total_mana_refund: int = 0
 	for entry in undo_stack:
@@ -585,7 +586,7 @@ func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = 
 	local player — opponent cards are simply removed from the board (the
 	opponent's client manages their own hand). Recall also clears any Stun on the
 	card (StunManager.clear_stun) before the owner check, on both clients.
-	"""
+	Reusable for any card ability that recalls an ally (Ahri, future cards…)."""
 	if not is_instance_valid(card):
 		return
 
