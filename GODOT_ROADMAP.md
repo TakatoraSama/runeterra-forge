@@ -13,16 +13,16 @@ Where the card text and the code disagree, **the code is the source of truth**.
 
 ## Roadmap overview
 
-| Phase | Focus | Why in this order | Size |
-|---|---|---|---|
-| **0. Upgrade to Godot 4.7** | Engine migration (§0) | Low risk. All later work (particles, shaders, new scenes) is built on the target version | S |
-| **1. Critical fixes (cheap ones only)** | Seed fix, cosmetic RNG split, per-match reset of singletons, keyword badge path bug (§1.1 a+d, §1.6) | Correctness first. The other desync fixes (§1.1 b, c, e) are **superseded by Phase 3**, so don't hand-write mirror RPCs | S |
-| **2. Quick wins** | Saved decks used in matches, text/code mismatches, undo tracker (§1.2, §1.5, §1.6) | Small, visible improvements for players | S |
-| **3. Multiplayer rework: host runs the rules** | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
-| **4. VFX foundation + status effects** | Generalise the Stun pattern. Elusive float, Deep glow (§2.1, §2.2) | Reuses shipped code. Status effects read card state, so they can start during Phase 3 | M |
-| **5. Event effects** | Play/flip, kill, discard, recall, create, summon, swap, lane reveal, Sun Disc (§2.3), each as a handler for one event type | One presenter handler per event (Phase 3) | M |
-| **6. Cinematics** | Trundle ice pillar, level-up cinematic (§2.4) | Biggest visual effort. Needs Phases 3–5 | L |
-| **7. Content** | The 27 unimplemented cards, the text-only keywords, Quick Attack (§1.3, §1.4). Each is shipped **together with its VFX** | Written directly against the new rules engine. New gameplay needs no new network code | L (ongoing) |
+| Phase | Status | Focus | Why in this order | Size |
+|---|---|---|---|---|
+| **0. Upgrade to Godot 4.7** | ✅ **Done**: Godot 4.7.2, commit `63570fe` on `upgrade/godot-4.7`. No regressions vs the 4.6 baseline. Manual GUI smoke test + Windows export still pending | Engine migration (§0) | Low risk. All later work (particles, shaders, new scenes) is built on the target version | S |
+| **1. Critical fixes (cheap ones only)** | ✅ **Done**: commit `088f423` (branch `fix/phase-1-critical`, merged into `upgrade/godot-4.7`). `tools/lan_selftest.sh` passes (and fails with the old seed formula). Manual GUI check (F9 Stun, spell badge) + a LAN match with real plays still pending | Seed fix, cosmetic RNG split, per-match reset of singletons, keyword badge path bug (§1.1 a+d, §1.6), plus a found bug: `CardSpell.tscn` had no script attached. Adds debug-only auto-connect flags (`--autohost`, `--autojoin=<ip>`, `--autoendturn`, `--quit-on-end`), `[SYNC]` log lines, and `tools/lan_selftest.sh` to test LAN sync unattended | Correctness first. The other desync fixes (§1.1 b, c, e) are **superseded by Phase 3**, so don't hand-write mirror RPCs | S |
+| **2. Quick wins** | Planned | Saved decks used in matches, text/code mismatches, undo tracker, MiniCard SubViewport warning (§1.2, §1.5, §1.6) | Small, visible improvements for players | S |
+| **3. Multiplayer rework: host runs the rules** | Planned | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
+| **4. VFX foundation + status effects** | Planned (Stun ✅ shipped) | Generalise the Stun pattern. Elusive float, Deep glow (§2.1, §2.2) | Reuses shipped code. Status effects read card state, so they can start during Phase 3 | M |
+| **5. Event effects** | Planned | Play/flip, kill, discard, recall, create, summon, swap, lane reveal, Sun Disc (§2.3), each as a handler for one event type | One presenter handler per event (Phase 3) | M |
+| **6. Cinematics** | Planned | Trundle ice pillar, level-up cinematic (§2.4) | Biggest visual effort. Needs Phases 3–5 | L |
+| **7. Content** | Planned | The 27 unimplemented cards, the text-only keywords, Quick Attack (§1.3, §1.4). Each is shipped **together with its VFX** | Written directly against the new rules engine. New gameplay needs no new network code | L (ongoing) |
 
 Phase 2 and Phase 4 can overlap with Phase 3. Phase 7 is ongoing: pick one champion line at a time.
 **Target multiplayer scope: friends / LAN.** Details in Part 3.
@@ -150,10 +150,12 @@ Decide which one is right, then fix the other:
 
 | Problem | Where | Fix | Phase |
 |---|---|---|---|
-| Adding a runtime keyword (e.g. Stun) to a **spell or landmark** errors: the badge sprite is looked up at the root, but it lives at `HBoxContainer/SpriteMargin/KeywordSprite` | `CardSpell._refresh_keyword_display`, `CardLandmark._refresh_keyword_display` | Copy the `Card.gd` version, or move one shared badge builder into `CardDatabase` | 1 |
+| Adding a runtime keyword (e.g. Stun) to a **spell or landmark** errors: the badge sprite is looked up at the root, but it lives at `HBoxContainer/SpriteMargin/KeywordSprite` | `CardSpell._refresh_keyword_display`, `CardLandmark._refresh_keyword_display` | Copy the `Card.gd` version, or move one shared badge builder into `CardDatabase` | 1 ✅ (shared `CardDatabase.fill_keyword_container`) |
+| Spell cards were instantiated **without their script**: in `CardSpell.tscn`, `script = ExtResource(...)` had been merged into the node header, where Godot ignores it. It only worked because `Deck.draw_card` / `CardManager` re-attach it with `set_script()` | `Scenes/CardSpell.tscn` root node | Move `script = …` to its own property line (the `set_script()` fallbacks stay as harmless safety nets) | 1 ✅ |
 | Autoload singletons are never reset. A second match in one session keeps old stuns, swap history, lane state and bot hand | `StunManager` (has `reset()`, never called), `SwapLaneManager`, `LaneManager`, `BotManager` | Add `reset()` to each and call them from `GameManager.start_game()` | 1 |
 | Undo returns cards but leaves their `summoned_cards` entries, which can count toward Azir, Irelia, Kennen and Sion level-ups | `CardManager._on_undo_button_pressed` | Remove the matching unresolved entries (`was_played_from_hand && !is_resolved`) | 2 |
 | Recalled stunned card stays tinted in hand until the next resolve | `StunManager.on_resolve_start` / `CardManager.recall_card` | Decide the rule. If recall should clear stun, remove the entry in `recall_card` | 2 |
+| Engine warning in Card Catalog and Deck Builder: "Can't change the size of a `SubViewport` with a `SubViewportContainer` parent that has `stretch` enabled" (31× per screen; pre-existing, also on 4.6) | `MiniCard.gd:71` `set_display_size` sets `vp.size` while the container has `stretch = true` | Drop the manual `vp.size` assignment (stretch already sizes it), or set `stretch = false` and keep sizing manually | 2 |
 | Unused code: `NetworkManager.local_zone_to_network` / `network_zone_to_local` / `is_local_action`, `get_beheld_cards_filtered`, `count_beheld_matching`, `card_glow_outline.gdshader`, `card_flash.tres`, `VocabDatabase` | various | Keep what future features need (glow shader → VFX, Vocab → tooltips) and delete the rest | any |
 
 ### 1.7 Suggested fix order
