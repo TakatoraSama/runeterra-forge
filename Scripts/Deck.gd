@@ -146,6 +146,9 @@ func draw_card() -> void:
 	if cost_offset != 0:
 		cm.adjust_cost([new_card], cost_offset)
 
+	# Janna lv2 passive: every card its owner draws is discounted
+	AbilityResolver.apply_janna_draw_cost_reduce(new_card)
+
 	# Track for Janna level-up condition
 	cm.track_drawn_card(card_id_str, owner_player_id)
 
@@ -199,6 +202,9 @@ func draw_specific_cards(card_ids: Array) -> void:
 
 		if cost_offset != 0:
 			cm.adjust_cost([new_card], cost_offset)
+
+		# Janna lv2 passive: every card its owner draws is discounted
+		AbilityResolver.apply_janna_draw_cost_reduce(new_card)
 
 		cm.track_drawn_card(cid, owner_player_id)
 		print("Drew specific card from deck: %s (ID: %s)" % [drawn_data.Name, cid])

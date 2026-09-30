@@ -133,8 +133,15 @@ func _apply_aura_azir(azir_card: Node, zone_key: Vector2i) -> void:
 			ally.aura_power_modifier += aura_amount
 
 
+func _is_back_row(board: Node, zone_key: Vector2i, card: Node) -> bool:
+	"""Single definition of "back row": slot index 2 or 3 within its own zone
+	(indices 0-1 are the front row). Used by the Xerath lv2 and lv3 auras."""
+	return board.get_card_slot_index_in_zone(zone_key, card) >= 2
+
+
 func _apply_aura_xerath_lv2(xerath_card: Node, zone_key: Vector2i) -> void:
-	"""Xerath lv2 aura: all enemy Champions/Followers in this lane have -aura_debuff Power."""
+	"""Xerath lv2 aura: back-row enemy Champions/Followers in this lane have
+	-aura_debuff Power."""
 	var board := _get_board()
 	if not board:
 		return
@@ -151,6 +158,9 @@ func _apply_aura_xerath_lv2(xerath_card: Node, zone_key: Vector2i) -> void:
 			continue
 		var enemy_type: String = enemy_data.get("Type", "")
 		if enemy_type != "Champion" and enemy_type != "Follower":
+			continue
+		# Only back-row enemies are affected (see _is_back_row)
+		if not _is_back_row(board, enemy_zone, enemy):
 			continue
 		enemy.aura_power_modifier -= aura_debuff
 
@@ -179,10 +189,8 @@ func _apply_aura_xerath_lv3(xerath_card: Node, zone_key: Vector2i) -> void:
 			if enemy_type != "Champion" and enemy_type != "Follower":
 				continue
 			# Back-row = slot index 2 or higher
-			var slot_idx: int = board.get_card_slot_index_in_zone(enemy_zone, enemy)
-			if slot_idx < 2:
-				continue
-			enemy.aura_power_modifier -= aura_debuff
+			if _is_back_row(board, enemy_zone, enemy):
+				enemy.aura_power_modifier -= aura_debuff
 
 
 func _apply_aura_irelia_lv2(irelia_card: Node, zone_key: Vector2i) -> void:
