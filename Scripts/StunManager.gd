@@ -8,6 +8,7 @@ extends Node
 ##   - Blocks the card's Round Start ability
 ##   - Blocks the card's Round End ability
 ## Expiry rule: removed at the START of _proceed_to_resolve() if stunned_on_turn < current_turn.
+## Recall rule: recalling a card to hand clears its Stun immediately (see clear_stun).
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────
@@ -38,6 +39,26 @@ func has_stun(card: Node) -> bool:
 		if is_instance_valid(entry["card"]) and entry["card"] == card:
 			return true
 	return false
+
+
+func clear_stun(card: Node) -> void:
+	"""Remove Stun from a card immediately (recall rule: returning a card to hand
+	clears its Stun). Drops the tracked entry and clears the runtime keyword so the
+	tint/swirl visual fades out. Safe to call on a card that isn't stunned — the
+	F9 debug toggle adds the visual without registering an entry."""
+	if not is_instance_valid(card):
+		return
+	var found := false
+	for i in range(_stun_entries.size() - 1, -1, -1):
+		if _stun_entries[i]["card"] == card:
+			_stun_entries.remove_at(i)
+			found = true
+			break
+	card.remove_runtime_keyword("Stun")
+	if found:
+		print("StunManager: Stun cleared on %s (recall, total stunned: %d)" % [
+			card.card_id, _stun_entries.size()])
+
 
 
 func on_resolve_start(current_turn: int) -> void:
