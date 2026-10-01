@@ -12,6 +12,7 @@ var active_temp_mana: int = 0  # temp bonus active this turn
 var is_deep: bool = false
 var permanently_leveled_up: Dictionary = {}  # champion Name -> highest card_id
 var ended_turn: bool = false
+var undo_stack: Array[Dictionary] = []  # {instance_id, hand_index, cost}, one entry per card played from hand this turn
 
 
 ## Returns the current maximum mana (base + bonus), never below 0.
@@ -30,6 +31,13 @@ func to_dict() -> Dictionary:
 	var level_up_out: Dictionary = {}
 	for name in permanently_leveled_up:
 		level_up_out[str(name)] = str(permanently_leveled_up[name])
+	var undo_out: Array = []
+	for entry in undo_stack:
+		undo_out.append({
+			"instance_id": int(entry.get("instance_id", -1)),
+			"hand_index": int(entry.get("hand_index", -1)),
+			"cost": int(entry.get("cost", 0)),
+		})
 	return {
 		"deck": deck_out,
 		"hand": hand_out,
@@ -41,6 +49,7 @@ func to_dict() -> Dictionary:
 		"is_deep": is_deep,
 		"permanently_leveled_up": level_up_out,
 		"ended_turn": ended_turn,
+		"undo_stack": undo_out,
 	}
 
 
@@ -70,4 +79,14 @@ static func from_dict(d: Dictionary) -> PlayerState:
 		level_up[str(name)] = str(raw_level_up[name])
 	p.permanently_leveled_up = level_up
 	p.ended_turn = bool(d.get("ended_turn", false))
+	var undo_in: Array[Dictionary] = []
+	var raw_undo: Array = d.get("undo_stack", [])
+	for raw_entry in raw_undo:
+		var entry: Dictionary = raw_entry as Dictionary
+		undo_in.append({
+			"instance_id": int(entry.get("instance_id", -1)),
+			"hand_index": int(entry.get("hand_index", -1)),
+			"cost": int(entry.get("cost", 0)),
+		})
+	p.undo_stack = undo_in
 	return p

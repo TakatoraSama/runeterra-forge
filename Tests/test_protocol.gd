@@ -40,6 +40,33 @@ func test_event_card_drawn() -> void:
 	assert_eq(e["card_id"], "Azir1")
 
 
+func test_event_spell_resolved() -> void:
+	var e := MatchEvents.spell_resolved(1, 6)
+	assert_eq(e["type"], MatchEvents.SPELL_RESOLVED)
+	assert_eq(e["player"], 1)
+	assert_eq(e["instance_id"], 6)
+
+
+func test_event_card_shuffled_into_deck() -> void:
+	var e := MatchEvents.card_shuffled_into_deck(0, 8, "Azir1")
+	assert_eq(e["type"], MatchEvents.CARD_SHUFFLED_INTO_DECK)
+	assert_eq(e["player"], 0)
+	assert_eq(e["instance_id"], 8)
+	assert_eq(e["card_id"], "Azir1")
+
+
+func test_event_resolve_started() -> void:
+	var plays := [
+		{"player": 0, "instance_id": 3, "col": 1, "slot": 0},
+		{"player": 1, "instance_id": 4, "col": -1, "slot": 2},
+	]
+	var e := MatchEvents.resolve_started(plays)
+	assert_eq(e["type"], MatchEvents.RESOLVE_STARTED)
+	assert_eq(e["plays"], plays)
+	for play: Dictionary in e["plays"]:
+		assert_false(play.has("card_id"), "resolve_started must not leak card identities")
+
+
 func test_event_card_created_in_hand() -> void:
 	var e := MatchEvents.card_created_in_hand(1, 9, "Nasus1", 4)
 	assert_eq(e["type"], MatchEvents.CARD_CREATED_IN_HAND)
@@ -170,6 +197,26 @@ func test_redact_passes_other_events_unchanged() -> void:
 		assert_eq(MatchEvents.redact_for(event, 0), event, "unrelated event is passed through as-is")
 
 
+func test_redact_strips_opponent_shuffled_card_id() -> void:
+	var shuffled := MatchEvents.card_shuffled_into_deck(1, 5, "Azir1")
+	var seen: Variant = MatchEvents.redact_for(shuffled, 0)
+	assert_true(seen is Dictionary, "the shuffle itself is still sent")
+	assert_false(seen.has("card_id"), "opponent card_id is hidden")
+	assert_eq(seen["instance_id"], 5)
+	assert_eq(seen["player"], 1)
+	assert_true(MatchEvents.redact_for(shuffled, 1).has("card_id"), "owner keeps card_id")
+
+
+func test_redact_sends_resolve_started_to_both() -> void:
+	# The opponent must be able to show face-down cards from turn one, so this event
+	# has no card_id and is never hidden.
+	var event := MatchEvents.resolve_started([
+		{"player": 1, "instance_id": 4, "col": 0, "slot": 1},
+	])
+	assert_eq(MatchEvents.redact_for(event, 0), event, "visible to the opponent")
+	assert_eq(MatchEvents.redact_for(event, 1), event, "visible to the owner")
+
+
 func test_redact_does_not_mutate_input() -> void:
 	var drawn := MatchEvents.card_drawn(1, 5, "Azir1")
 	var snapshot := drawn.duplicate(true)
@@ -290,20 +337,43 @@ func test_rules_rejects_wrong_phase() -> void:
 	assert_eq(events[0]["intent_type"], "play_card")
 
 
-func test_rules_accepts_valid_intent_in_play_phase() -> void:
+func test_rules_rejects_unknown_card_in_play_phase() -> void:
 	var state := MatchState.new()
 	state.game_phase = MatchState.GamePhase.TURN_LOOP
 	state.round_phase = MatchState.RoundPhase.PLAY
 	var rules := MatchRules.new(state)
-	assert_eq(rules.submit(0, MatchIntents.play_card(1, 0)), [], "M1 accepts the play without acting on it")
-	assert_eq(rules.submit(1, MatchIntents.end_turn()), [], "M1 accepts end_turn")
-	assert_eq(rules.submit(1, MatchIntents.undo()), [], "M1 accepts undo")
-	assert_eq(rules.submit(1, MatchIntents.swap_card(1, 1)), [], "M1 accepts swap_card")
+
+	var play := rules.submit(0, MatchIntents.play_card(1, 0))
+	assert_eq(play.size(), 1, "one rejection")
+	assert_eq(play[0]["type"], MatchEvents.INTENT_REJECTED)
+	assert_eq(play[0]["player"], 0)
+	assert_eq(play[0]["intent_type"], "play_card")
+	assert_eq(play[0]["reason"], "not_in_hand", "instance 1 is on no hand in a bare state")
+
+	var undo_events := rules.submit(1, MatchIntents.undo())
+	assert_eq(undo_events.size(), 1)
+	assert_eq(undo_events[0]["reason"], "nothing_to_undo")
+	assert_eq(undo_events[0]["intent_type"], "undo")
+
+	var swap_events := rules.submit(1, MatchIntents.swap_card(1, 1))
+	assert_eq(swap_events.size(), 1)
+	assert_eq(swap_events[0]["reason"], "not_your_card", "instance 1 is not player 1's card")
+	assert_eq(swap_events[0]["intent_type"], "swap_card")
+
+	# One player ending is still legal and resolves nothing on its own.
+	var end_events := rules.submit(0, MatchIntents.end_turn())
+	var rejections: Array = []
+	for e: Dictionary in end_events:
+		if e["type"] == MatchEvents.INTENT_REJECTED:
+			rejections.append(e)
+	assert_eq(rejections, [], "end_turn from a single player is accepted")
+	assert_eq(state.round_phase, MatchState.RoundPhase.PLAY, "the round waits for the opponent")
 
 
-func test_rules_advance_is_a_noop_in_m1() -> void:
+func test_rules_advance_returns_no_events() -> void:
+	# M2 drives all progress from start_match / submit, so advance() is still inert.
 	var rules := MatchRules.new(MatchState.new())
-	assert_eq(rules.advance(), [], "advance does nothing yet")
+	assert_eq(rules.advance(), [], "advance returns no events")
 
 
 # --- MatchSetup smoke test ---

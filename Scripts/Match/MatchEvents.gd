@@ -39,6 +39,10 @@ const DEEP_CHANGED := &"deep_changed"				# {player, is_deep}
 const SUN_DISC_RESTORED := &"sun_disc_restored"	# {player}
 const GAME_ENDED := &"game_ended"				# {winner (-1 = tie), lane_powers: [[p0c0, p0c1, p0c2], [p1c0, p1c1, p1c2]]}
 
+const SPELL_RESOLVED := &"spell_resolved"			# {player, instance_id}
+const CARD_SHUFFLED_INTO_DECK := &"card_shuffled_into_deck"	# {player, instance_id, card_id}
+const RESOLVE_STARTED := &"resolve_started"			# {plays: Array} - {player, instance_id, col, slot} per card, no card_id
+
 
 static func turn_started(turn: int) -> Dictionary:
 	"""Round start: the turn counter advanced to `turn`."""
@@ -225,6 +229,28 @@ static func game_ended(winner: int, lane_powers: Array) -> Dictionary:
 	return {"type": GAME_ENDED, "winner": winner, "lane_powers": lane_powers}
 
 
+static func spell_resolved(player: int, instance_id: int) -> Dictionary:
+	"""`player`'s spell `instance_id` finished resolving and left the board."""
+	return {"type": SPELL_RESOLVED, "player": player, "instance_id": instance_id}
+
+
+static func card_shuffled_into_deck(player: int, instance_id: int, card_id: String) -> Dictionary:
+	"""`player` shuffled card `instance_id` (card_id `card_id`) from hand back into their deck."""
+	return {
+		"type": CARD_SHUFFLED_INTO_DECK,
+		"player": player,
+		"instance_id": instance_id,
+		"card_id": card_id,
+	}
+
+
+static func resolve_started(plays: Array) -> Dictionary:
+	"""The resolve phase began. `plays` lists the cards going down this round as
+	{player, instance_id, col, slot}, with no card_id: everyone sees the board, the
+	card identities stay secret until they are revealed one by one."""
+	return {"type": RESOLVE_STARTED, "plays": plays}
+
+
 static func redact_for(event: Dictionary, viewer: int) -> Variant:
 	"""Return what `viewer` is allowed to see of `event`, or null if nothing is sent.
 	`event` is never mutated: the result is always a deep copy.
@@ -237,7 +263,7 @@ static func redact_for(event: Dictionary, viewer: int) -> Variant:
 		CARD_PLAYED, PLAY_UNDONE, SWAP_STARTED:
 			if is_opponent:
 				return null
-		CARD_DRAWN, CARD_CREATED_IN_HAND:
+		CARD_DRAWN, CARD_CREATED_IN_HAND, CARD_SHUFFLED_INTO_DECK:
 			if is_opponent:
 				copy.erase("card_id")
 	return copy
