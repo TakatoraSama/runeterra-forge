@@ -14,6 +14,13 @@
 ##   - every level-up is an instant `ops.level_up()` (no animation lock / await);
 ##   - trackers are matched on INSTANCE ids where the old code compared card nodes or
 ##     card ids (see the Ahri note below).
+##   - a summon only counts once it is REVEALED: a card played from hand gets its
+##     `summoned` entry written face-down at play time and flipped by the reveal, so
+##     Azir, Irelia, Kennen and Trundle never level off a card the opponent has not
+##     seen yet (Sion already skipped unresolved entries, like the old code);
+##   - Azir and Irelia exclude only their OWN instance, not every entry with their
+##     card_id: a second copy the owner summoned is an ally, as it is for every other
+##     champion (the old code compared card ids and skipped them all).
 ##
 ## No Node, no scene tree, no signals, no autoloads.
 class_name MatchLevelUps
@@ -58,7 +65,8 @@ static func check_all(ctx: MatchAbilities) -> bool:
 # ─── Individual level-up checks ──────────────────────────────────────────────────
 
 ## Azir lv1 → lv2: ally_threshold+ summoned allies or landmarks of the owner
-## (Azir itself excluded). Port of `_check_azir_levelup`.
+## (Azir's own instance excluded; unrevealed summons not counted).
+## Port of `_check_azir_levelup`.
 static func _check_azir_levelup(ctx: MatchAbilities) -> bool:
 	var state: MatchState = ctx.state
 	var ops: MatchOps = ctx.ops
@@ -68,7 +76,7 @@ static func _check_azir_levelup(ctx: MatchAbilities) -> bool:
 		if ops.card_name(id) != "Azir" or ops.card_level(id) != 1:
 			continue
 		var ally_threshold: int = ops.bv(id, "ally_threshold", 6)
-		var count: int = _count_summoned(state, card.owner, card.card_id, true)
+		var count: int = _count_summoned(state, card.owner, id, true)
 		if count < ally_threshold:
 			continue
 		if _level_up_and_check_disc(ctx, id):
@@ -77,6 +85,7 @@ static func _check_azir_levelup(ctx: MatchAbilities) -> bool:
 
 
 ## Irelia lv1 → lv2: ally_threshold+ summoned Champions/Followers (no landmarks).
+## Irelia's own instance is excluded; unrevealed summons are not counted.
 ## Port of `_check_irelia_levelup`.
 static func _check_irelia_levelup(ctx: MatchAbilities) -> bool:
 	var state: MatchState = ctx.state
@@ -87,7 +96,7 @@ static func _check_irelia_levelup(ctx: MatchAbilities) -> bool:
 		if ops.card_name(id) != "Irelia" or ops.card_level(id) != 1:
 			continue
 		var ally_threshold: int = ops.bv(id, "ally_threshold", 6)
-		var count: int = _count_summoned(state, card.owner, card.card_id, false)
+		var count: int = _count_summoned(state, card.owner, id, false)
 		if count < ally_threshold:
 			continue
 		if _level_up_to_data(ctx, id, "LevelUpTo"):
@@ -95,17 +104,20 @@ static func _check_irelia_levelup(ctx: MatchAbilities) -> bool:
 	return changed
 
 
-## Counts the owner's `summoned` tracker entries, skipping the champion's own card id.
-## Champions and Followers always count; Landmarks only for Azir (Irelia excludes them).
+## Counts the owner's REVEALED `summoned` entries, skipping the champion's own INSTANCE
+## (a second copy of the same champion counts as an ally). Champions and Followers
+## always count; Landmarks only for Azir (Irelia excludes them).
 ## Port of the two counting loops inside `_check_azir_levelup` / `_check_irelia_levelup`.
-static func _count_summoned(state: MatchState, owner_id: int, self_card_id: String, include_landmarks: bool) -> int:
+static func _count_summoned(state: MatchState, owner_id: int, self_instance_id: int, include_landmarks: bool) -> int:
 	var count: int = 0
 	for entry: Dictionary in state.summoned:
 		if int(entry.get("owner_player_id", -1)) != owner_id:
 			continue
-		var summoned_card_id: String = str(entry.get("card_id", ""))
-		if summoned_card_id == self_card_id:
+		if int(entry.get("instance_id", -1)) == self_instance_id:
 			continue  # Skip the champion herself
+		if not bool(entry.get("is_resolved", false)):
+			continue  # Still face-down in the resolve queue
+		var summoned_card_id: String = str(entry.get("card_id", ""))
 		var card_type: String = str(CardDatabase.CARDS.get(summoned_card_id, {}).get("Type", ""))
 		if card_type == "Champion" or card_type == "Follower":
 			count += 1
@@ -114,7 +126,8 @@ static func _count_summoned(state: MatchState, owner_id: int, self_card_id: Stri
 	return count
 
 
-## Trundle lv1 → lv2 for BOTH owners: the owner played an Ice Pillar from hand.
+## Trundle lv1 → lv2 for BOTH owners: the owner played an Ice Pillar from hand AND it
+## has been revealed (an unrevealed one is still face-down and does not count).
 ## Port of `_check_trundle_levelup` (the owner argument is gone, the gating removed).
 static func _check_trundle_levelup(ctx: MatchAbilities) -> bool:
 	var state: MatchState = ctx.state
@@ -128,6 +141,8 @@ static func _check_trundle_levelup(ctx: MatchAbilities) -> bool:
 			if int(entry.get("owner_player_id", -1)) != owner_id:
 				continue
 			if not bool(entry.get("was_played_from_hand", false)):
+				continue
+			if not bool(entry.get("is_resolved", false)):
 				continue
 			ice_pillar_played = true
 			break
@@ -226,7 +241,8 @@ static func _check_ahri_levelup(ctx: MatchAbilities) -> bool:
 	return changed
 
 
-## Kennen lv1 → lv2: the owner summoned the same ally summon_threshold+ times.
+## Kennen lv1 → lv2: the owner summoned the same ally summon_threshold+ times. A copy
+## still face-down in the resolve queue does not count yet.
 ## Port of `_check_kennen_levelup`.
 static func _check_kennen_levelup(ctx: MatchAbilities) -> bool:
 	var state: MatchState = ctx.state
@@ -240,6 +256,8 @@ static func _check_kennen_levelup(ctx: MatchAbilities) -> bool:
 		var id_counts: Dictionary = {}
 		for entry: Dictionary in state.summoned:
 			if int(entry.get("owner_player_id", -1)) != card.owner:
+				continue
+			if not bool(entry.get("is_resolved", false)):
 				continue
 			var sid: String = str(entry.get("card_id", ""))
 			id_counts[sid] = int(id_counts.get(sid, 0)) + 1
