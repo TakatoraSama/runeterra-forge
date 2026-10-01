@@ -10,16 +10,45 @@ extends "res://Tests/test_case.gd"
 
 const SEED := 4242
 
-## What the host handed to the outside world, in order.
+## What the host handed to the outside world, in order. `deliveries` keeps the two
+## streams interleaved, which is the only way to see that a snapshot really did
+## alternate with the batches it belongs to.
 class Sink extends RefCounted:
 	var batches: Array = []      # {viewer, events, seq}
-	var snapshots: Array = []    # {viewer, snapshot}
+	var snapshots: Array = []    # {viewer, snapshot} — the snapshot carries its own seq
+	var deliveries: Array = []   # {kind: "events"|"snapshot", viewer, seq}, in order
 
 	func on_events(viewer: int, events: Array, seq: int) -> void:
 		batches.append({"viewer": viewer, "events": events, "seq": seq})
+		deliveries.append({"kind": "events", "viewer": viewer, "seq": seq})
 
 	func on_snapshot(viewer: int, snapshot: Dictionary) -> void:
 		snapshots.append({"viewer": viewer, "snapshot": snapshot})
+		deliveries.append({"kind": "snapshot", "viewer": viewer, "seq": int(snapshot.get("seq", -1))})
+
+	## One viewer's deliveries as [["snapshot"|"events", seq], ...], in order.
+	func timeline(viewer: int) -> Array:
+		var out: Array = []
+		for entry in deliveries:
+			if int(entry["viewer"]) == viewer:
+				out.append([str(entry["kind"]), int(entry["seq"])])
+		return out
+
+	## The newest snapshot one viewer was sent, or {}.
+	func latest_snapshot(viewer: int) -> Dictionary:
+		var found: Dictionary = {}
+		for entry in snapshots:
+			if int(entry["viewer"]) == viewer:
+				found = entry["snapshot"]
+		return found
+
+	## The snapshots one viewer was sent, in order.
+	func snapshots_for(viewer: int) -> Array:
+		var out: Array = []
+		for entry in snapshots:
+			if int(entry["viewer"]) == viewer:
+				out.append(entry["snapshot"])
+		return out
 
 	## The batches one viewer received, in order.
 	func for_viewer(viewer: int) -> Array:
@@ -120,16 +149,22 @@ func _rejections(events: Array) -> Array:
 # Delivery
 # ----------------------------
 
-func test_the_snapshot_reaches_every_viewer_before_the_first_batch() -> void:
+func test_the_opening_snapshot_precedes_the_first_batch_and_is_seq_zero() -> void:
 	var sink := Sink.new()
 	var host := _host(sink, [0, 1], [0, 1])
 	host.start(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED)
-	assert_eq(sink.snapshots.size(), 2, "both viewers got one")
-	assert_true(sink.batches.size() > 0, "and the event stream followed")
-	assert_eq(int(sink.snapshots[0]["viewer"]), 0, "each entry names its viewer")
-	assert_eq(int(sink.snapshots[1]["viewer"]), 1)
-	assert_eq(sink.snapshots[0]["snapshot"]["local"], 0, "the snapshot is that viewer's")
-	assert_eq(sink.snapshots[1]["snapshot"]["local"], 1)
+	assert_eq(sink.deliveries.size() > 2, true, "the match produced deliveries")
+	for viewer in [0, 1]:
+		var first: Dictionary = sink.snapshots_for(viewer)[0]
+		assert_eq(int(first["seq"]), 0, "nothing has been delivered yet, so the opening is seq 0")
+		assert_eq(int(first["local"]), viewer, "and it is that viewer's")
+	# The very first thing the host did was push a snapshot, to each viewer in turn.
+	assert_eq(str(sink.deliveries[0]["kind"]), "snapshot", "viewer 0 opened on a snapshot")
+	assert_eq(int(sink.deliveries[0]["viewer"]), 0)
+	assert_eq(str(sink.deliveries[1]["kind"]), "snapshot", "and so did viewer 1")
+	assert_eq(int(sink.deliveries[1]["viewer"]), 1)
+	assert_eq(str(sink.deliveries[2]["kind"]), "events", "only then came the first batch")
+	assert_eq(int(sink.deliveries[2]["seq"]), 0, "numbered 0, like the snapshot it followed")
 
 
 func test_a_viewer_outside_snapshot_viewers_never_gets_a_snapshot() -> void:
@@ -138,6 +173,73 @@ func test_a_viewer_outside_snapshot_viewers_never_gets_a_snapshot() -> void:
 	host.start(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED)
 	assert_eq(sink.snapshots, [], "no snapshot viewer, no snapshot")
 	assert_true(sink.batches.size() > 0, "but the events still flow")
+	for step in sink.timeline(0):
+		assert_eq(str(step[0]), "events", "viewer 0 only ever gets batches")
+
+
+func test_a_snapshot_viewer_alternates_snapshot_and_batch_all_match() -> void:
+	# The guest has no MatchState, so the only picture it can check itself against is
+	# the one the host pushes. Strict alternation is what makes it trustworthy: a
+	# snapshot always describes exactly the batches that came before it.
+	var sink := Sink.new()
+	var host := _lan_host(sink)
+	_ack_all(host)
+	for _round in 4:
+		host.submit(0, MatchIntents.end_turn())
+		host.submit(1, MatchIntents.end_turn())
+		_ack_all(host)
+
+	var timeline: Array = sink.timeline(1)
+	assert_true(timeline.size() > 10, "the match produced plenty of deliveries")
+	assert_eq(str(timeline[0][0]), "snapshot", "it opens on a snapshot")
+	for i in timeline.size():
+		var step: Array = timeline[i]
+		if i % 2 == 0:
+			assert_eq(str(step[0]), "snapshot", "delivery %d is a snapshot" % i)
+			assert_eq(int(step[1]), i / 2, "and it is numbered by the batches so far")
+		else:
+			assert_eq(str(step[0]), "events", "delivery %d is a batch" % i)
+			assert_eq(int(step[1]), (i - 1) / 2, "and it carries the same number")
+	# The timeline is the opening snapshot followed by one (batch, snapshot) pair per
+	# batch, so it is always one entry longer than the batch count.
+	assert_eq(sink.snapshots_for(1).size(), sink.for_viewer(1).size() + 1,
+		"a snapshot after every batch, plus the opening one")
+	assert_eq(sink.for_viewer(1).size(), (timeline.size() - 1) / 2, "and no batch without one")
+
+
+func test_every_delivered_snapshot_is_the_state_of_that_moment() -> void:
+	# The host is synchronous and does nothing else after a call returns, so the newest
+	# snapshot a viewer holds must equal snapshot_for() right now, plus its seq.
+	var sink := Sink.new()
+	var host := _lan_host(sink)
+	_ack_all(host)
+	var bots: Array = [_bot_rng(0), _bot_rng(1)]
+	for _round in 3:
+		for player in [0, 1]:
+			for intent: Variant in MatchBot.decide(host.state, player, bots[player]):
+				host.submit(player, intent)
+		_check_latest_snapshot(sink, host, 1, "a bot round")
+		_ack_all(host)
+		_check_latest_snapshot(sink, host, 1, "a play_opened release")
+
+
+func test_snapshot_for_carries_no_seq() -> void:
+	var sink := Sink.new()
+	var host := _lan_host(sink)
+	for viewer in [0, 1]:
+		assert_false(host.snapshot_for(viewer).has("seq"),
+			"the local picture has no seq — only a delivered copy is tagged")
+
+
+func _check_latest_snapshot(sink: Sink, host: MatchHost, viewer: int, where: String) -> void:
+	var delivered: Dictionary = sink.latest_snapshot(viewer)
+	assert_false(delivered.is_empty(), "%s: a snapshot was delivered" % where)
+	assert_eq(int(delivered.get("seq", -1)), sink.for_viewer(viewer).size(),
+		"%s: its seq counts the batches that viewer has received" % where)
+	var expected := host.snapshot_for(viewer)
+	var stripped := delivered.duplicate(true)
+	stripped.erase("seq")
+	assert_eq(stripped, expected, "%s: and it is the state of that moment" % where)
 
 
 func test_every_viewer_receives_the_raw_batch_redacted_for_them() -> void:
@@ -463,26 +565,34 @@ func test_check_hello_never_hands_the_seed_or_the_host_deck_back() -> void:
 
 func test_two_simulated_peers_play_to_the_same_winner_as_the_engine() -> void:
 	# The host decides player 0 from the state; the guest decides player 1 from the
-	# snapshot it was sent, with its own generator and no MatchState at all. Both go
-	# through submit() and wait for the acks. The result must match a plain engine run
-	# in which both sides are the same bot — that is the whole no-leak, no-desync claim.
+	# snapshots that were DELIVERED to it — it never touches host.state, never calls
+	# snapshot_for(), and holds no MatchState at all. Both go through submit() and wait
+	# for the acks. The result must match a plain engine run in which both sides are the
+	# same bot: that is the whole no-leak, no-desync claim.
 	var via_host := _two_peers()
 	var direct := _direct_run()
 	assert_eq(via_host["winner"], direct["winner"], "same winner")
 	assert_true(via_host["winner"] == 0 or via_host["winner"] == 1, "and there was a winner")
 	assert_eq(via_host["turn"], direct["turn"], "the same number of turns")
 	assert_eq(via_host["checksum"], direct["checksum"], "and byte-identical final state")
+	assert_true(int(via_host["guest_snapshots"]) > 5, "the guest really autoplayed from snapshots")
+	assert_eq(via_host["guest_seq"], via_host["guest_batches_at_use"],
+		"the snapshot it decided from was current: its seq matched the batches it had")
 
 
 ## Plays the match through the host: player 0 with decide(), player 1 with
-## decide_from_snapshot(snapshot_for(1)). Returns {winner, turn, checksum}.
+## decide_from_snapshot() on the guest's newest DELIVERED snapshot.
+## Returns {winner, turn, checksum, guest_snapshots, guest_batches, guest_seq,
+## guest_batches_at_use}.
 func _two_peers() -> Dictionary:
 	var sink := Sink.new()
 	var host := MatchHost.new(sink.on_events, sink.on_snapshot)
 	host.acks_required = [0, 1]
+	host.snapshot_viewers = [1]
 	host.start(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED, true)
 	var rngs: Array = [_bot_rng(0), _bot_rng(1)]
 	var guard: int = 0
+	var seen_at_use: Array = [-1, -1]
 	while not host.is_over() and guard < 200:
 		guard += 1
 		if host.pending_turn() != -1:
@@ -492,13 +602,21 @@ func _two_peers() -> Dictionary:
 			break
 		for intent: Variant in MatchBot.decide(host.state, 0, rngs[0]):
 			host.submit(0, intent)
-		for intent: Variant in MatchBot.decide_from_snapshot(host.snapshot_for(1), rngs[1]):
+		# What the guest has: the newest snapshot the host pushed to it. Nothing else.
+		var guest_view: Dictionary = sink.latest_snapshot(1)
+		seen_at_use[0] = int(guest_view.get("seq", -1))
+		seen_at_use[1] = sink.for_viewer(1).size()
+		for intent: Variant in MatchBot.decide_from_snapshot(guest_view, rngs[1]):
 			host.submit(1, intent)
 	_ack_all(host)
 	return {
 		"winner": host.winner(),
 		"turn": host.state.turn,
 		"checksum": host.state.checksum(),
+		"guest_snapshots": sink.snapshots_for(1).size(),
+		"guest_batches": sink.for_viewer(1).size(),
+		"guest_seq": seen_at_use[0],
+		"guest_batches_at_use": seen_at_use[1],
 	}
 
 

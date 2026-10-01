@@ -23,7 +23,23 @@ const DECK_1: Array[String] = [
 const SEEDS: Array[int] = [1, 2, 3, 7, 99]
 
 
+## Everything MatchHost handed out, so the sweep can judge the DELIVERED traffic rather
+## than a batch this test redacted itself.
+##
+## _started() below returns a match already in turn 1 PLAY with the real abilities.
+class DeliverySink extends RefCounted:
+	var deliveries: Array = []  # {kind: "events"|"snapshot", viewer, seq, events|snapshot}
+
+	func on_events(viewer: int, events: Array, seq: int) -> void:
+		deliveries.append({"kind": "events", "viewer": viewer, "seq": seq, "events": events})
+
+	func on_snapshot(viewer: int, snapshot: Dictionary) -> void:
+		deliveries.append({"kind": "snapshot", "viewer": viewer,
+			"seq": int(snapshot.get("seq", -1)), "snapshot": snapshot})
+
+
 ## A match in turn 1 PLAY with the real abilities, starting from the decks above.
+
 func _started(seed_value: int, deck0: Array = DECK_0, deck1: Array = DECK_1) -> MatchRules:
 	var rules := MatchRules.new(MatchSetup.new_match(deck0, deck1, seed_value))
 	MatchCardAbilities.install(rules)
@@ -482,37 +498,71 @@ func test_match_leak_check_finds_nothing_over_five_seeds_and_both_decks() -> voi
 			_sweep(seed_value, decks[0], decks[1])
 
 
-## Plays one whole match, feeding every batch — redacted per viewer, exactly as the host
-## would send it — and every snapshot to a MatchLeakCheck for BOTH players. Any leak in
-## any of them fails the test, naming the batch it came from.
+## Plays one whole match THROUGH MatchHost — so the batches are redacted and the
+## snapshots are built by the delivery path itself, not by this test — and feeds every
+## delivered batch and every delivered snapshot to a MatchLeakCheck for BOTH players.
+## Any leak in any of them fails the test, naming the batch it came from.
 func _sweep(seed_value: int, deck0: Array, deck1: Array) -> void:
 	var where: String = "seed %d, deck %s" % [seed_value, str(deck0[0])]
-	var state := MatchSetup.new_match(deck0, deck1, seed_value, true)
-	var rules := MatchRules.new(state)
-	MatchCardAbilities.install(rules)
+	var sink := DeliverySink.new()
+	var host := MatchHost.new(sink.on_events, sink.on_snapshot)
+	host.acks_required = []          # offline shape: play_opened rides in the same batch
+	host.snapshot_viewers = [0, 1]   # both sides get the debug snapshots
+	host.start(deck0, deck1, seed_value, true)
+	var state: MatchState = host.state
 	var checks: Array = [MatchLeakCheck.new(state, 0), MatchLeakCheck.new(state, 1)]
 
-	rules.start_match()
+	# Whatever start() already delivered goes through the checker too.
+	var ctx: Dictionary = {"done": 0, "counts": {0: 0, 1: 0}, "opening": {}}
+	_drain(sink, checks, state, where, ctx)
+
 	var bot := RandomNumberGenerator.new()
 	bot.seed = seed_value + 1
 	var guard: int = 0
 	while state.game_phase == MatchState.GamePhase.TURN_LOOP and guard < 40:
+		guard += 1
 		for player in [0, 1]:
 			for intent: Variant in MatchBot.decide(state, player, bot):
-				var batch := rules.submit(player, intent)
-				for viewer in [0, 1]:
-					var seen: Array = []
-					for event: Variant in batch:
-						var shown: Variant = MatchEvents.redact_for(event, viewer)
-						if shown != null:
-							seen.append(shown)
-					_collect(checks[viewer].check_batch(seen), where, viewer, "batch")
-					_collect(checks[viewer].check_snapshot(
-						MatchSnapshot.for_viewer(state, viewer)), where, viewer, "snapshot")
-		guard += 1
+				host.submit(player, intent)
+				_drain(sink, checks, state, where, ctx)
 	assert_eq(state.game_phase, MatchState.GamePhase.GAME_END, "%s: the match finished" % where)
 	for viewer in [0, 1]:
 		assert_true(checks[viewer].is_clean(), "%s: viewer %d stayed clean" % [where, viewer])
+
+
+## Checks everything the host delivered since the last drain, in delivery order. `ctx`
+## carries how far along the timeline this test already is, plus the batches each
+## viewer has been sent. The host is synchronous and nothing else touches the state
+## between a delivery and this call, so `state` IS the state that delivery described.
+func _drain(sink: DeliverySink, checks: Array, state: MatchState, where: String, ctx: Dictionary) -> void:
+	var done: int = int(ctx["done"])
+	var counts: Dictionary = ctx["counts"]
+	while done < sink.deliveries.size():
+		var entry: Dictionary = sink.deliveries[done]
+		done += 1
+		var viewer: int = int(entry["viewer"])
+		if str(entry["kind"]) == "events":
+			counts[viewer] = int(counts.get(viewer, 0)) + 1
+			assert_eq(int(entry["seq"]), int(counts[viewer]) - 1,
+				"%s: viewer %d: a batch's seq counts from 0" % [where, viewer])
+			_collect(checks[viewer].check_batch(entry["events"]), where, viewer, "batch")
+			continue
+		var snapshot: Dictionary = entry["snapshot"]
+		assert_eq(int(snapshot.get("seq", -1)), int(counts.get(viewer, 0)),
+			"%s: viewer %d: a snapshot's seq is the batch count it follows" % [where, viewer])
+		_collect(checks[viewer].check_snapshot(snapshot), where, viewer, "snapshot")
+		if not bool(ctx["opening"].get(viewer, false)):
+			# The OPENING snapshot is delivered before start_match(), so it describes the
+			# pre-start state by design; every later one must be the state of that moment.
+			ctx["opening"][viewer] = true
+			assert_eq(int(snapshot["turn"]), 0, "%s: viewer %d: the opening snapshot is pre-start"
+				% [where, viewer])
+			continue
+		var stripped: Dictionary = snapshot.duplicate(true)
+		stripped.erase("seq")
+		assert_eq(stripped, MatchSnapshot.for_viewer(state, viewer),
+			"%s: viewer %d: the delivered snapshot is the state of that moment" % [where, viewer])
+	ctx["done"] = done
 
 
 ## Fails once per issue, naming where it came from.

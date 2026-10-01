@@ -43,9 +43,12 @@
 ##       primitives and `seq` is that viewer's batch counter, incremented once per
 ##       delivery and starting at 0. A viewer compares seq to tell a gap from a stall.
 ##   deliver_snapshot(viewer: int, snapshot: Dictionary)
-##       A full state for `viewer` from MatchSnapshot.for_viewer(state, viewer). Sent
-##       BEFORE any event batch for a viewer: seq 0 of the event stream is the first
-##       batch after the snapshot, so a snapshot always precedes the events it explains.
+##       A full state for `viewer` from MatchSnapshot.for_viewer(state, viewer), plus a
+##       top-level "seq": the number of event batches that viewer has received. One is
+##       sent BEFORE any batch (seq 0, so the view can be built before the first event)
+##       and one after EVERY batch that viewer received, so a guest with no MatchState
+##       can always --verify-view and autoplay from a picture of exactly what it has
+##       animated. A viewer outside snapshot_viewers gets events only.
 ##
 ## ENGINE RULES (Scripts/Match, mandatory): RefCounted only, no Node, no get_node, no
 ## await, no timers, no autoload identifiers, no scene-tree access, no global randi()
@@ -113,7 +116,7 @@ func start(deck0: Array, deck1: Array, seed: int, scramble_ids: bool = false, la
 	# The snapshot always precedes the events it explains, so it goes out first — and
 	# before start_match(), while the board is still empty and nothing has been drawn.
 	for viewer in snapshot_viewers:
-		_deliver_snapshot.call(viewer, MatchSnapshot.for_viewer(state, viewer))
+		_deliver_snapshot_to(viewer, 0)
 	_publish(rules.start_match(lane_ids))
 
 
@@ -191,6 +194,9 @@ func winner() -> int:
 ## The full state `viewer` is allowed to see, from MatchSnapshot.for_viewer. Never
 ## sent to a viewer outside snapshot_viewers. This is the authoritative view --verify-view
 ## compares the presenter's model against.
+##
+## It carries NO "seq": that tag belongs to a DELIVERED snapshot, where it says how many
+## batches the viewer has received (see _deliver_snapshot_to). Locally the seq is known.
 func snapshot_for(viewer: int) -> Dictionary:
 	if state == null:
 		return {}
@@ -272,6 +278,8 @@ func _publish(events: Array) -> void:
 ## One redacted batch to one viewer, with that viewer's next seq. A batch that is empty
 ## for this viewer is not delivered at all and does not burn a seq: the numbers a
 ## viewer sees stay contiguous, which is what makes a missing seq mean a real gap.
+## A viewer in snapshot_viewers then gets the state it is allowed to see, tagged with
+## the seq of the NEXT batch it will get — see _deliver_snapshot_to.
 func _deliver_to(viewer: int, events: Array) -> void:
 	var visible: Array = []
 	for event: Variant in events:
@@ -284,6 +292,22 @@ func _deliver_to(viewer: int, events: Array) -> void:
 	_seq[viewer] = seq + 1
 	if _deliver_events.is_valid():
 		_deliver_events.call(viewer, visible, seq)
+	if snapshot_viewers.has(viewer):
+		_deliver_snapshot_to(viewer, seq + 1)
+
+
+## The debug snapshot that FOLLOWS a batch: the state `viewer` may see, tagged with
+## "seq" = the number of event batches this viewer has now received. That number is the
+## whole point: a viewer compares it with the batches it has animated and only trusts a
+## snapshot that lines up, so a snapshot can never be read half a turn ahead of the
+## board on screen. The opening snapshot, before any batch, is seq 0.
+## snapshot_for() itself stays seq-free — only a DELIVERED copy carries the tag.
+func _deliver_snapshot_to(viewer: int, seq: int) -> void:
+	if not _deliver_snapshot.is_valid():
+		return
+	var snapshot := snapshot_for(viewer)
+	snapshot["seq"] = seq
+	_deliver_snapshot.call(viewer, snapshot)
 
 
 ## Remembers the winner, so winner() can answer without replaying the log. A tie is -1,
