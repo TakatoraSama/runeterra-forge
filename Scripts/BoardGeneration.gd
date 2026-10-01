@@ -81,11 +81,14 @@ func pick_random_lane_ids() -> Array:
 	return result
 
 
+## Create and populate 3 lane scenes using the given lane ID list (index = column).
+## A BLANK id means "not revealed yet" and is rendered as a placeholder, in EVERY
+## column including 0: the engine reveals column 0 at game start, but the assignment
+## event still arrives before that reveal, and a viewer must never be able to read a
+## lane the engine has not published. The old code hard-coded "column 0 is always
+## visible", which put a lane on screen that this viewer was not entitled to see.
+## View-only: no LaneManager, no gameplay wiring.
 func create_lane_views(ordered_lane_ids: Array) -> void:
-	"""Create and populate 3 lane scenes using the given lane ID list (index = column).
-	Left lane (col 0) is fully revealed immediately.
-	Mid (col 1) and right (col 2) are hidden until turns 2 and 3 respectively.
-	View-only: no LaneManager, no gameplay wiring."""
 	if not lane_scene:
 		return
 
@@ -101,8 +104,11 @@ func create_lane_views(ordered_lane_ids: Array) -> void:
 		lane_instance.position = LANE_POSITIONS.get(col, Vector2.ZERO)
 		lane_nodes_by_col[col] = lane_instance
 
-		var lane_id: String = str(ordered_lane_ids[col]) if col < ordered_lane_ids.size() else "1"
-		var lane_data: Dictionary = LaneDatabase.LANES.get(lane_id, {})
+		var lane_id: String = str(ordered_lane_ids[col]) if col < ordered_lane_ids.size() else ""
+		var revealed := not lane_id.is_empty()
+		# An unrevealed column keeps NO lane data, so nothing here can be read back out
+		# of the board to recover a hidden lane's name or sprite.
+		var lane_data: Dictionary = LaneDatabase.LANES.get(lane_id, {}) if revealed else {}
 		lane_data_by_col[col] = lane_data
 
 		# Register lane for right-click detection in InputManager
@@ -111,22 +117,34 @@ func create_lane_views(ordered_lane_ids: Array) -> void:
 			lane_area.collision_layer = 8
 			lane_area.collision_mask = 0
 		lane_instance.set_meta("lane_id", lane_id)
-		lane_instance.set_meta("lane_reveal_turn", -1 if col == 0 else col + 1)
+		lane_instance.set_meta("lane_reveal_turn", -1 if revealed else col + 1)
 
-		if col == 0:
+		if revealed:
 			_apply_lane_visuals(lane_instance, lane_data)
 		else:
-			var reveal_turn := col + 1  # col 1 → turn 2, col 2 → turn 3
-			_apply_lane_visuals_hidden(lane_instance, reveal_turn)
+			# col 1 → turn 2, col 2 → turn 3: a lane is revealed on the turn after the
+			# one before it, so column `col` opens on turn col + 1.
+			_apply_lane_visuals_hidden(lane_instance, col + 1)
 
 
+## Same as create_lane_views(), plus wiring LaneManager so it can track reveals and
+## lane effects (old-engine path). LaneManager owns the reveal schedule there and
+## reveals column 0 itself, so the board is handed the ids with columns 1 and 2
+## blanked out: create_lane_views() now treats a blank id as hidden in EVERY column,
+## and the old path must not end up showing all three at once.
 func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
 	"""Same as create_lane_views(), plus wiring LaneManager so it can track
 	reveals and lane effects (old-engine path)."""
 	if not lane_scene:
 		return
 
-	create_lane_views(ordered_lane_ids)
+	var visible_ids: Array = ordered_lane_ids.duplicate()
+	for col in range(1, visible_ids.size()):
+		visible_ids[col] = ""
+	create_lane_views(visible_ids)
+	# LaneManager keeps the full list (it is the authority on the old path) and reveals
+	# columns 1 and 2 through reveal_lane_visuals() on turns 2 and 3.
+	reveal_lane_view(0, str(ordered_lane_ids[0]) if not ordered_lane_ids.is_empty() else "")
 
 	# Inform LaneManager of the lane assignment so it can track reveals and effects
 	LaneManager.setup_lanes(ordered_lane_ids)
@@ -159,15 +177,20 @@ func _apply_lane_visuals_hidden(lane_instance: Node, reveal_turn: int) -> void:
 		lane_sprite_node.texture = null
 
 
-func reveal_lane_view(col: int) -> void:
-	"""Called by the presenter when the engine reveals a lane.
-	Applies full name, sprite, and description to the lane scene."""
+## Called by the presenter when the engine reveals a lane. `lane_id` is the id the
+## lane_revealed event named — the board holds no copy of the hidden ids, so it cannot
+## look the data up itself. Applies the full name, sprite and description.
+func reveal_lane_view(col: int, lane_id: String = "") -> void:
 	var lane_instance = lane_nodes_by_col.get(col)
+	if not (lane_instance and is_instance_valid(lane_instance)):
+		return
+	if not lane_id.is_empty():
+		lane_data_by_col[col] = LaneDatabase.LANES.get(lane_id, {})
 	var lane_data: Dictionary = lane_data_by_col.get(col, {})
-	if lane_instance and is_instance_valid(lane_instance):
-		_apply_lane_visuals(lane_instance, lane_data)
-		lane_instance.set_meta("lane_reveal_turn", -1)
-
+	_apply_lane_visuals(lane_instance, lane_data)
+	lane_instance.set_meta("lane_id", lane_id if not lane_id.is_empty() \
+		else str(lane_instance.get_meta("lane_id", "")))
+	lane_instance.set_meta("lane_reveal_turn", -1)
 
 func reveal_lane_visuals(col: int) -> void:
 	"""Called by LaneManager when a hidden lane becomes revealed."""

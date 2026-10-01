@@ -33,12 +33,22 @@ func _ready() -> void:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+## `lane_id` is "" for a column the engine has not revealed yet (the board keeps no
+## copy of a hidden lane's id). A blank id must still open the preview — showing the
+## same "will be revealed on turn N" placeholder the board shows — rather than
+## returning early the way an unknown id does, or right-clicking a hidden lane would
+## do nothing at all.
 func show_lane_preview(lane_id: String, reveal_turn: int) -> void:
+	_reveal_turn = reveal_turn
+	if lane_id.is_empty():
+		_pages = ["lane:"]
+		_show_at_index(0)
+		visible = true
+		return
 	var lane_data: Dictionary = LaneDatabase.LANES.get(lane_id, {})
 	if lane_data.is_empty():
 		return
 
-	_reveal_turn = reveal_turn
 	_pages = ["lane:" + lane_id]
 	if reveal_turn == -1:  # only show related cards if lane is revealed
 		for card_id in lane_data.get("RelatedCard", []):

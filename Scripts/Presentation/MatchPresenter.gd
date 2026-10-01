@@ -15,12 +15,24 @@
 ## resolve_played_cards / finish_drag and no GameManager mana or turn function. The engine is
 ## the single source of truth and this file only ever reacts to MatchEvents.
 ##
-## Perspective (offline): the human is absolute player 1, so local_player is 1 and an engine
-## zone (col, owner) is board zone Vector2i(col, owner). The spell column -1 maps to
-## (-1, 1) allied and (-1, 0) enemy. The engine slot index equals the board slot index: a
-## zone list is compact, and Board.reposition_cards_in_zone puts list index i on entry i of
-## slots_by_zone — which is engine slot i on our own row and engine slot (n - 1 - i) on the
-## opponent's row, because create_all_slots fills that row in reverse. _build_slot_order()
+## Perspective: the engine's player ids are ABSOLUTE (0 = host, 1 = guest) and its
+## zones are keyed Vector2i(col, owner). The SCREEN has no absolute ids: the local
+## player's cards are always on the BOTTOM row and the opponent's on the TOP one,
+## whoever they are. _row(owner) is the only place that mapping exists, and every
+## Board touch point goes through it:
+##     _row(owner)     = 1 if owner == local_player else 0
+##     _board_zone(col, owner) = Vector2i(col, _row(owner))
+## Offline the human is absolute 1 and the bot 0, so the mapping is the identity there
+## and offline is unaffected; on a host it is what puts the host's own cards on the
+## bottom row. The engine-keyed _zones dictionary stays keyed by (col, owner) — only
+## the Board is addressed through _board_zone.
+##
+## The spell column -1 maps to (-1, 1) for the local player and (-1, 0) for the
+## opponent, which is exactly BoardGeneration.SPELL_ZONE_ALLIED / SPELL_ZONE_ENEMY.
+## The engine slot index equals the board slot index: a zone list is compact, and
+## Board.reposition_cards_in_zone puts list index i on entry i of slots_by_zone —
+## which is engine slot i on the BOTTOM row and engine slot (n - 1 - i) on the TOP
+## one, because create_all_slots fills that row in reverse. _build_slot_order()
 ## measures that mapping from the live slot nodes instead of assuming it.
 ##
 ## Events arrive already redacted through MatchEvents.redact_for(event, local_player), so the
@@ -59,7 +71,11 @@ const CARD_PAUSE := 0.7
 const TOAST_FADE_TIME := 1.5
 const CARD_BACK_Z := 5
 
-## Human-readable text for every reason MatchRules rejects an intent with.
+## Human-readable text for every reason an intent is refused or a session ends: the
+## keys MatchRules rejects with, plus the SESSION-layer reasons of M5a (a refused
+## handshake, a disconnect, a session closed before the turn opened). The session ones
+## are read by session_reason_text() rather than _on_intent_rejected, because a
+## session ending is not a rejected move and shows an overlay instead of a toast.
 const REASON_TEXT := {
 	"not_enough_mana": "Not enough mana",
 	"zone_full": "That zone is full",
@@ -79,6 +95,12 @@ const REASON_TEXT := {
 	"wrong_phase": "You cannot do that right now",
 	"malformed": "That move is not legal",
 	"bad_player": "Unknown player",
+	"not_ready": "Waiting for your opponent",
+	"disconnected": "Opponent disconnected",
+	"opponent_left": "Opponent left",
+	"bad_protocol": "Different game versions cannot play together",
+	"second_guest": "That slot is already taken",
+	"bad_deck": "That deck is not valid",
 }
 
 ## Where a card sits, from the presenter's point of view.
@@ -110,6 +132,11 @@ var _game_phase: int = 0
 var _round_phase: int = 0
 var _turn: int = 0
 var _flip_first: int = -1
+## The three lane ids as THIS view knows them: "" for a column that is still hidden.
+## The engine's state.lane_ids holds all three from the start, so this is the only
+## copy of them that is allowed to be blank — a hidden column must not be readable
+## from the view, and _verify_lanes() compares it against the snapshot.
+var _lane_ids: Array = ["", "", ""]
 var _lanes_revealed: Array[bool] = [false, false, false]
 ## The local player's queued lane swaps, as the snapshot lists them.
 var _pending_swaps: Array = []
@@ -121,6 +148,26 @@ var _deck_by_player: Dictionary = {}
 ## Mana label both need it on every mana change.
 var _local_mana_current: int = 0
 var _local_mana_max: int = 0
+
+## absolute player id -> true once that player pressed End Turn this round. Fed by
+## TURN_ENDED (public to both viewers, so each side can grey out its own button while
+## the round waits for the other player) and cleared at every ROUND_START.
+var _ended_turn: Dictionary = {0: false, 1: false}
+## The turn whose PLAY phase this view has been OPENED for, or -1 when it has not.
+## PLAY_OPENED is the session layer's own event (MatchHost holds it back until every
+## peer has acked the previous turn), and it is what says the round may be acted in at
+## all: the phase changes to PLAY in the same batch, so view_in_play() alone would let
+## the local player submit into a turn the other peer has not finished animating.
+var _play_open_turn: int = -1
+## The local player's own undo stack depth, as the view understands it. Grown by our
+## own card_played, zeroed by our own play_undone and by every round start (the engine
+## clears the stack there). The guest holds no MatchState to ask, so can_undo() is
+## answered from this.
+var _own_undo_count: int = 0
+## True once the session ended for a reason the rules do not own (a disconnect, a
+## refused handshake). While it is set the local player may not act any more and the
+## overlay stays up until they leave for the lobby.
+var _session_over: bool = false
 
 # ----------------------------
 # View model
@@ -151,6 +198,8 @@ var _processing: bool = false
 ## Bumped by every drain, so a superseded one can tell that its deferred `idle` is stale.
 var _drain_generation: int = 0
 var _toast_label: Label = null
+## The session-ended overlay, created on first use and freed by the next setup().
+var _session_overlay: CanvasLayer = null
 
 ## board zone Vector2i(col, row) -> Array mapping engine slot index to index in slots_by_zone.
 var _slot_order: Dictionary = {}
@@ -195,20 +244,30 @@ func setup(snapshot: Dictionary, local_player_id: int, p_controller: Node) -> vo
 	for col in range(MatchState.SPELL_COL, MatchState.COLUMNS):
 		for owner in 2:
 			_zones[Vector2i(col, owner)] = []
+	_ended_turn = {0: false, 1: false}
+	_play_open_turn = -1
+	_own_undo_count = 0
+	_session_over = false
+	_session_overlay = null
 
 	if _card_manager != null and "current_player_id" in _card_manager:
 		_card_manager.current_player_id = local_player
 	_build_slot_order()
 
-	# Lanes: create_lane_views reveals column 0 on its own, the rest wait for lane_revealed.
-	var lane_ids: Array = []
+	# Lanes: every column starts blank (a blank id means HIDDEN, column 0 included —
+	# the old view assumed column 0 was always on screen, which is not true for a
+	# viewer whose snapshot was taken before the first reveal). A column is filled in
+	# only when lane_revealed names it.
+	_lane_ids = ["", "", ""]
 	for lane: Dictionary in snapshot.get("lanes", []):
+		var col := int(lane.get("col", -1))
+		if col < 0 or col >= MatchState.COLUMNS:
+			continue
 		var revealed := bool(lane.get("revealed", false))
-		lane_ids.append(str(lane.get("lane_id", "")) if revealed else "")
-	_create_lane_views(lane_ids)
-	for col in MatchState.COLUMNS:
-		if col < _lanes_revealed.size() and bool(_lanes_revealed[col]):
-			_reveal_lane_view(col)
+		var lane_id := str(lane.get("lane_id", "")) if revealed else ""
+		_lane_ids[col] = lane_id
+		_lanes_revealed[col] = revealed
+	_create_lane_views(_lane_ids)
 
 	# Numbers first, so a hand node spawned below already glows against the right mana.
 	for entry: Dictionary in snapshot.get("players", []):
@@ -311,19 +370,26 @@ func verify(snapshot: Dictionary) -> Array[String]:
 
 ## True while the local player may act, as the VIEW sees it:
 ##   the presenter is idle, the round is in TURN_LOOP / PLAY, play_opened has been
-##   received for this turn, the local player has not ended the turn, no end_turn has
-##   been sent for it yet, and the session is still alive.
-## STUB: needs the play_opened / ended_turn tracking Group B adds.
+##   received for THIS turn, the local player has not ended the turn, and the session
+##   is still alive.
+## The presenter-idle half is what keeps the button greyed out while the board is still
+## animating: the board the player is looking at would otherwise be one batch behind
+## the engine they are submitting into.
 func local_can_act() -> bool:
-	push_error("MatchPresenter: not implemented (M5a Group B)")
-	return false
+	if _session_over:
+		return false
+	if is_busy():
+		return false
+	if not view_in_play():
+		return false
+	if _play_open_turn != _turn:
+		return false
+	return not bool(_ended_turn.get(local_player, false))
 
 
-## How many of the local player's plays this turn can still be undone. STUB: needs the
-## undo_count the snapshot and play_undone events will carry (M5a Group A / B).
+## How many of the local player's plays this turn can still be undone.
 func local_undo_count() -> int:
-	push_error("MatchPresenter: not implemented (M5a Group B)")
-	return 0
+	return _own_undo_count
 
 
 ## The turn the view is showing, from the last turn_started / phase_changed event.
@@ -346,22 +412,108 @@ func is_match_over() -> bool:
 
 
 ## True when the local player may start dragging card `instance_id` to another column:
-## it is an own resolved Elusive card on the board, not stunned, with no pending swap,
-## and the target column is different. This is the VIEW-side gate CardManager's swap
-## check will use instead of reading the controller's state (which the guest lacks).
-## STUB: needs the Elusive / stun / pending-swap view state Group B completes.
+## it is an own resolved Elusive card on the board, not stunned, with no pending swap.
+## This is the VIEW-side gate CardManager's swap check uses instead of reading the
+## controller's state (which the guest does not have). It is deliberately the same
+## five conditions MatchRules._swap_card enforces, minus the target column: whether
+## the drop is legal is answered when the card is released, and the engine's own
+## intent_rejected is what tells the player about a same-column or full target.
 func can_start_swap(instance_id: int) -> bool:
-	push_error("MatchPresenter: not implemented (M5a Group B)")
-	return false
+	var entry: Dictionary = _entries.get(instance_id, {})
+	if entry.is_empty():
+		return false
+	if int(entry.get("owner", -1)) != local_player:
+		return false
+	if int(entry.get("location", ViewLocation.GONE)) != ViewLocation.BOARD:
+		return false
+	if not bool(entry.get("resolved", false)):
+		return false
+	if not _entry_has_keyword(entry, "Elusive"):
+		return false
+	if _entry_has_keyword(entry, "Stun"):
+		return false
+	for swap: Dictionary in _pending_swaps:
+		if int(swap.get("instance_id", -1)) == instance_id:
+			return false
+	return true
 
+
+## The card's keywords as the engine counts them: the printed ones from CardDatabase
+## plus the runtime ones the event stream granted (Stun and Elusive can arrive either
+## way, so the gate has to look at both).
+func _entry_has_keyword(entry: Dictionary, keyword: String) -> bool:
+	if _card_data_keywords(str(entry.get("card_id", ""))).has(keyword):
+		return true
+	return (entry.get("keywords", []) as Array).has(keyword)
 
 ## Shows the session-ended overlay: `message` is the human text ("Opponent
 ## disconnected", "Opponent left"), `match_over` says whether the finished result must
 ## stay visible underneath (true when the match had already reached GAME_END).
 ## Back to lobby on the overlay calls MatchController.leave_to_lobby().
-## STUB: no overlay scene exists yet (M5a Group B).
+##
+## Built in code rather than from a .tscn: it is a dim panel, one line of text and a
+## button, and a scene file would be a new asset that only this one caller ever loads.
+## `match_over` moves the panel DOWN so it never covers the VictoryText the result was
+## written into.
 func show_session_ended(message: String, match_over: bool) -> void:
-	push_error("MatchPresenter: not implemented (M5a Group B)")
+	_session_over = true
+	_refresh_controls()
+	if _session_overlay != null and is_instance_valid(_session_overlay):
+		_session_overlay.queue_free()
+	_session_overlay = null
+	if not is_inside_tree():
+		return
+
+	var layer := CanvasLayer.new()
+	layer.name = "SessionEndedOverlay"
+	layer.layer = 100
+	add_child(layer)
+	_session_overlay = layer
+
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.color = Color(0.0, 0.0, 0.0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	layer.add_child(dim)
+
+	var panel := PanelContainer.new()
+	panel.name = "Panel"
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	# Below the centre when the result is showing, so VictoryText stays readable.
+	panel.position = Vector2(0, 200 if match_over else 0)
+	layer.add_child(panel)
+
+	var box := VBoxContainer.new()
+	box.name = "Box"
+	box.add_theme_constant_override("separation", 20)
+	panel.add_child(box)
+
+	var label := Label.new()
+	label.name = "Message"
+	label.text = message
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 34)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	label.add_theme_constant_override("outline_size", 6)
+	box.add_child(label)
+
+	var button := Button.new()
+	button.name = "BackToLobby"
+	button.text = "Back to lobby"
+	button.custom_minimum_size = Vector2(260, 52)
+	button.pressed.connect(_on_session_overlay_back_to_lobby)
+	box.add_child(button)
+
+
+## Hands control back to the controller, which closes the peer and reloads the scene.
+## Called dynamically: the controller is a plain Node field so this file keeps loading
+## without it.
+func _on_session_overlay_back_to_lobby() -> void:
+	if controller != null and controller.has_method("leave_to_lobby"):
+		controller.call("leave_to_lobby")
 
 
 # ----------------------------
@@ -405,6 +557,12 @@ func _process_event(event: Dictionary) -> void:
 			_on_turn_started(event)
 		MatchEvents.PHASE_CHANGED:
 			_on_phase_changed(event)
+		MatchEvents.TURN_ENDED:
+			_on_turn_ended(event)
+		MatchEvents.PLAY_OPENED:
+			_on_play_opened(event)
+		MatchEvents.SESSION_ENDED:
+			_on_session_ended(event)
 		MatchEvents.MANA_CHANGED:
 			_on_mana_changed(event)
 		MatchEvents.PRIORITY_CHANGED:
@@ -473,7 +631,15 @@ func _process_event(event: Dictionary) -> void:
 
 func _on_turn_started(event: Dictionary) -> void:
 	_turn = int(event.get("turn", _turn))
+	# A new round is a new turn's business: neither player has ended it, neither has any
+	# play to take back, and the play_opened that will reopen input belongs to the turn
+	# that is starting. Clearing it here is what keeps local_can_act() false until the
+	# session layer releases the new turn.
+	_ended_turn = {0: false, 1: false}
+	_own_undo_count = 0
+	_play_open_turn = -1
 	_set_turn_text()
+	_refresh_controls()
 
 
 func _on_phase_changed(event: Dictionary) -> void:
@@ -487,6 +653,36 @@ func _on_phase_changed(event: Dictionary) -> void:
 		_swap_preview.clear()
 	_set_turn_text()
 	_refresh_controls()
+
+
+## A player pressed End Turn. The engine emits this for BOTH players (unlike the old
+## engine, which said nothing for the player who did not end it), so the view can grey
+## out the local button as soon as the local player is done instead of waiting for the
+## round to resolve.
+func _on_turn_ended(event: Dictionary) -> void:
+	var pid := int(event.get("player", -1))
+	if pid < 0 or pid > 1:
+		return
+	_ended_turn[pid] = true
+	_refresh_controls()
+
+
+## PLAY is open for `turn`: the session layer has released this turn and the local
+## player may submit into it. Until this arrives the round is in PLAY as far as the
+## PHASE is concerned but closed as far as input is, which is the whole point of the
+## presentation_done gate — one peer must never submit into a turn the other is still
+## animating.
+func _on_play_opened(event: Dictionary) -> void:
+	_play_open_turn = int(event.get("turn", _turn))
+	_refresh_controls()
+
+
+## The session ended for a reason the rules do not own. `reason` is a REASON_TEXT key;
+## the overlay is the same one the controller's end_session() shows, so a guest that
+## learns about a disconnect from the event stream and one that learns about it from
+## MatchNet look identical to the player.
+func _on_session_ended(event: Dictionary) -> void:
+	show_session_ended(session_reason_text(str(event.get("reason", ""))), is_match_over())
 
 
 func _on_mana_changed(event: Dictionary) -> void:
@@ -541,6 +737,16 @@ func _refresh_controls() -> void:
 		_undo_button.disabled = not can_undo
 
 
+## The overlay text for a session reason key. An unknown key falls back to the generic
+## disconnect message rather than to an empty overlay: every reason this project
+## invents means the same thing to the player — the match they were in is over and the
+## only way forward is the lobby — and a blank panel with no button would be a dead end.
+static func session_reason_text(reason: String) -> String:
+	if REASON_TEXT.has(reason):
+		return str(REASON_TEXT[reason])
+	return "Opponent disconnected"
+
+
 func _on_game_ended(event: Dictionary) -> void:
 	# game_ended is the last event of a match, and the drain carrying it can be superseded
 	# before its deferred idle lands (the controller's autoplay submits once more on the
@@ -567,17 +773,23 @@ func _on_game_ended(event: Dictionary) -> void:
 # Lanes
 # ----------------------------
 
-func _on_lane_assigned(event: Dictionary) -> void:
-	var ids: Variant = event.get("lane_ids", [])
-	_create_lane_views(ids if ids is Array else [])
+## The three lanes were assigned, all still hidden. The event's lane_ids are NOT used:
+## they are the engine's full list and naming them here would put an unrevealed lane
+## on screen. Every column is created blank instead and filled in by lane_revealed.
+func _on_lane_assigned(_event: Dictionary) -> void:
+	_lane_ids = ["", "", ""]
+	_lanes_revealed = [false, false, false]
+	_create_lane_views(_lane_ids)
 
 
 func _on_lane_revealed(event: Dictionary) -> void:
 	var col := int(event.get("col", -1))
 	if col < 0 or col >= MatchState.COLUMNS:
 		return
+	# The id comes from THIS event, which is the only place a lane's name is published.
+	_lane_ids[col] = str(event.get("lane_id", ""))
 	_lanes_revealed[col] = true
-	_reveal_lane_view(col)
+	_reveal_lane_view(col, str(_lane_ids[col]))
 
 
 ## A short flash on the lane that just fired; no state of its own.
@@ -599,10 +811,13 @@ func _create_lane_views(lane_ids: Array) -> void:
 	_board.call("create_lane_views", lane_ids)
 
 
-func _reveal_lane_view(col: int) -> void:
+## Fills lane `col` in with `lane_id`'s name, sprite and description. The id is passed
+## rather than read back from the board because a hidden column was created blank and
+## the board deliberately kept no copy of the engine's hidden ids.
+func _reveal_lane_view(col: int, lane_id: String) -> void:
 	if _board == null or not _board.has_method("reveal_lane_view"):
 		return
-	_board.call("reveal_lane_view", col)
+	_board.call("reveal_lane_view", col, lane_id)
 
 
 # ----------------------------
@@ -739,6 +954,10 @@ func _on_card_played(event: Dictionary) -> void:
 	_place_in_zone(entry, int(event.get("col", -1)), int(event.get("slot", -1)))
 	entry["resolved"] = false
 	entry["face_down"] = false
+	# The engine pushed this play onto the local undo stack, one entry per play. Counting
+	# it here is what lets can_undo() answer for a guest, which has no MatchState: the
+	# guest's own plays are the only ones that ever reach this view.
+	_own_undo_count += 1
 	node.is_in_hand = false
 	node.hide_glow()
 	node.z_index = 0
@@ -752,6 +971,8 @@ func _on_play_undone(event: Dictionary) -> void:
 	var pid := int(event.get("player", -1))
 	if pid != local_player:
 		return
+	# An undo takes back EVERY play of the turn and empties the engine's stack.
+	_own_undo_count = 0
 	for raw: Variant in event.get("instance_ids", []):
 		var id := int(raw)
 		var entry: Dictionary = _entries.get(id, {})
@@ -923,6 +1144,7 @@ func _on_card_revealed(event: Dictionary) -> void:
 	# + cost_mod rather than the printed base.
 	entry["cost"] = maxi(0, _base_cost(card_id) + int(entry["cost_mod"]))
 	entry["power"] = _base_power(card_id) + int(entry["power_mod"])
+	_apply_revealed_values(entry, event)
 	_place_in_zone(entry, int(event.get("col", -1)), int(event.get("slot", -1)))
 	entry["resolved"] = true
 	entry["face_down"] = false
@@ -930,6 +1152,63 @@ func _on_card_revealed(event: Dictionary) -> void:
 	await _await_anim(node, &"card_flip_play", ANIMATION_LIMIT)
 	node.hide_card_back()
 	await get_tree().create_timer(CARD_PAUSE).timeout
+
+
+## Takes the FINAL power / cost / keywords a card_revealed or card_summoned event
+## carries, when it carries them at all.
+##
+## These keys are optional (M5a): the event omits power and cost at their -1 sentinel
+## and keywords when empty, so a 5-argument call still produces the old event and this
+## is a no-op for it. When they ARE present they are the engine's own totals, and they
+## are the only correct source for a viewer: a face-down card's cost and keywords never
+## reached this view as events, so base + the modifiers the view happens to know about
+## would be a guess, while a power buff applied while the card was face down is simply
+## unknowable. Deriving the modifiers from the final totals (total - printed base) keeps
+## the node's coloured labels and the model in step.
+func _apply_revealed_values(entry: Dictionary, event: Dictionary) -> void:
+	var card_id := str(entry.get("card_id", ""))
+	if event.has("power"):
+		entry["power"] = int(event["power"])
+		entry["power_mod"] = int(event["power"]) - _base_power(card_id)
+	if event.has("cost"):
+		entry["cost"] = int(event["cost"])
+		entry["cost_mod"] = int(event["cost"]) - _base_cost(card_id)
+	if event.has("keywords"):
+		entry["keywords"] = _runtime_keywords(card_id, event["keywords"])
+		_push_runtime_keywords(entry)
+
+
+## The RUNTIME half of the engine's keyword list: what the event reported minus the
+## keywords the card is printed with. CardState.keywords() is the printed list followed
+## by the runtime one, and _verify_board compares in that same order, so the two halves
+## have to be stored apart.
+func _runtime_keywords(card_id: String, engine_keywords: Array) -> Array:
+	var runtime: Array = []
+	for raw: Variant in engine_keywords:
+		if not runtime.has(str(raw)):
+			runtime.append(str(raw))
+	for printed: Variant in _card_data_keywords(card_id):
+		runtime.erase(str(printed))
+	return runtime
+
+
+## Brings the node's runtime keyword badges in line with the model entry, which a
+## reveal replaces wholesale (a face-down card that resolves to a Stunned Elusive has
+## never had either badge, and one whose stun expired while it was hidden has to lose
+## it). Diffed against what the node already carries rather than cleared, because
+## Card.gd exposes only add/remove_runtime_keyword and this file must not assume a
+## clear_runtime_keywords that Group C does not own.
+func _push_runtime_keywords(entry: Dictionary) -> void:
+	var node := node_for(int(entry.get("instance_id", -1)))
+	if node == null or not node.has_method("add_runtime_keyword"):
+		return
+	var wanted: Array = entry.get("keywords", [])
+	if "runtime_keywords" in node:
+		for old: Variant in node.runtime_keywords:
+			if not wanted.has(str(old)) and node.has_method("remove_runtime_keyword"):
+				node.remove_runtime_keyword(str(old))
+	for keyword: Variant in wanted:
+		node.add_runtime_keyword(str(keyword))
 
 
 # ----------------------------
@@ -1045,6 +1324,11 @@ func _on_card_summoned(event: Dictionary) -> void:
 	entry["cost"] = maxi(0, _base_cost(card_id) + int(entry["cost_mod"]))
 	entry["power"] = _base_power(card_id) + int(entry["power_mod"])
 	entry["keywords"] = []
+	# Same as a reveal: when the event carries the final values they win over anything
+	# this view reconstructed. A summon is public for both players, so an opponent's
+	# summoned card is the one case where the view would otherwise show a wrong number
+	# it had no way to correct.
+	_apply_revealed_values(entry, event)
 	entry["resolved"] = true
 	entry["face_down"] = false
 	_place_in_zone(entry, col, slot)
@@ -1533,9 +1817,12 @@ func _remove_from_zone_model(id: int) -> void:
 	entry["slot"] = -1
 
 
-## Rebuilds one board zone from the model and lets the old repositioner lay the cards out.
-## Swap previews are re-applied afterwards: the model keeps a previewing card at its origin,
-## so a plain reposition would yank it back mid-gesture.
+## Rebuilds one board zone from the model and lets the old repositioner lay the cards
+## out. Swap previews are re-applied afterwards: the model keeps a previewing card at
+## its origin, so a plain reposition would yank it back mid-gesture.
+##
+## The model is keyed by the engine's absolute (col, owner); the Board is addressed by
+## the screen (col, row), which is the same thing only for the local player.
 func _sync_zone(col: int, owner: int) -> void:
 	if _board == null or col < MatchState.SPELL_COL:
 		return
@@ -1545,8 +1832,9 @@ func _sync_zone(col: int, owner: int) -> void:
 		var node := node_for(int(raw))
 		if node != null:
 			nodes.append(node)
-	_board.cards_by_zone[Vector2i(col, owner)] = nodes
-	_board.reposition_cards_in_zone(Vector2i(col, owner))
+	var board_zone := _board_zone(col, owner)
+	_board.cards_by_zone[board_zone] = nodes
+	_board.reposition_cards_in_zone(board_zone)
 	for id: Variant in _swap_preview:
 		var entry: Dictionary = _entries.get(int(id), {})
 		if entry.is_empty() or int(entry.get("col", -1)) != col:
@@ -1574,7 +1862,7 @@ func _refresh_zone_power_texts() -> void:
 				if not _card_data(str(entry.get("card_id", ""))).has("Power"):
 					continue
 				total += int(entry.get("power", 0))
-			power_by_zone[Vector2i(col, owner)] = total
+			power_by_zone[_board_zone(col, owner)] = total
 	_board.call("update_zone_power_texts", power_by_zone)
 
 
@@ -1582,9 +1870,24 @@ func _is_spell_zone(col: int) -> bool:
 	return col == MatchState.SPELL_COL
 
 
-## board zone Vector2i(col, owner) -> Array mapping engine slot index to the index in
-## slots_by_zone that holds it. Measured from the live slot positions rather than assumed,
-## because the opponent's rows fill their slot list in reverse.
+## The screen row absolute `owner`'s cards sit on: 1 (bottom) for the local player,
+## 0 (top) for the opponent. This and _board_zone() are the ONLY places an absolute
+## engine id becomes a screen row — offline the human is 1 so this is the identity, and
+## on a host it is what puts the host's own cards on the bottom instead of the top.
+func _row(owner: int) -> int:
+	return 1 if owner == local_player else 0
+
+
+## The Board zone Vector2i for engine column `col` and absolute `owner`. Matches
+## BoardGeneration.SPELL_ZONE_ALLIED / SPELL_ZONE_ENEMY for the spell column.
+func _board_zone(col: int, owner: int) -> Vector2i:
+	return Vector2i(col, _row(owner))
+
+
+## (col, owner) -> Array mapping engine slot index to the index in
+## slots_by_zone that holds it. Measured from the live slot positions rather than
+## assumed, because the TOP row fills its slot list in reverse. _slot_order stays keyed
+## by the engine's (col, owner); only the Board lookup inside is a screen row.
 func _build_slot_order() -> void:
 	_slot_order.clear()
 	if _board == null:
@@ -1592,16 +1895,17 @@ func _build_slot_order() -> void:
 	for col in range(MatchState.SPELL_COL, MatchState.COLUMNS):
 		for owner in 2:
 			var zone := Vector2i(col, owner)
-			var slots: Array = _board.slots_by_zone.get(zone, [])
+			var row := _row(owner)
+			var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
 			var order: Array = []
 			order.resize(slots.size())
 			for s in slots.size():
-				var fallback: int = s if (col == MatchState.SPELL_COL or owner == local_player) \
+				var fallback: int = s if (col == MatchState.SPELL_COL or row == 1) \
 					else (slots.size() - 1 - s)
 				order[s] = fallback
 				if col == MatchState.SPELL_COL:
 					continue
-				var want: Vector2 = _board.get_slot_position(col, owner, s)
+				var want: Vector2 = _board.get_slot_position(col, row, s)
 				for i in slots.size():
 					if slots[i].position.is_equal_approx(want):
 						order[s] = i
@@ -1612,7 +1916,7 @@ func _build_slot_order() -> void:
 func _slot_for(col: int, owner: int, slot: int) -> Variant:
 	if _board == null or slot < 0 or col < MatchState.SPELL_COL:
 		return null
-	var slots: Array = _board.slots_by_zone.get(Vector2i(col, owner), [])
+	var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
 	var order: Array = _slot_order.get(Vector2i(col, owner), [])
 	if slot >= order.size() or slot >= slots.size():
 		return null
@@ -1633,7 +1937,7 @@ func _slot_position(col: int, owner: int, slot: int) -> Vector2:
 func _first_free_slot_position(col: int, owner: int) -> Vector2:
 	if _board == null:
 		return Vector2.INF
-	var slots: Array = _board.slots_by_zone.get(Vector2i(col, owner), [])
+	var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
 	for slot_node in slots:
 		if is_instance_valid(slot_node) and not bool(slot_node.card_in_slot):
 			return slot_node.position
@@ -1722,8 +2026,16 @@ func _build_from_snapshot_row(row: Dictionary) -> void:
 	if node == null:
 		return
 	entry["node"] = node
-	entry["cost"] = int(row.get("cost", _base_cost(card_id)))
-	entry["power"] = int(row["power"]) if row.get("power") != null else 0
+	# A hidden opponent card has cost = null in M5a (and keywords = null): the engine
+	# is saying "you do not know this", not "this is zero". int(null) is a hard error,
+	# so both are read through the sentinel first — an unknown cost falls back to the
+	# printed value, which is what a face-down stand-in shows anyway, and unknown
+	# keywords are an empty set, exactly like a card that has no runtime keywords.
+	var shown_cost: Variant = row.get("cost", null)
+	entry["cost"] = int(shown_cost) if shown_cost != null \
+		else _base_cost(card_id)
+	var shown_power: Variant = row.get("power", null)
+	entry["power"] = int(shown_power) if shown_power != null else 0
 	entry["power_mod"] = entry["power"] - _base_power(card_id)
 	entry["keywords"] = []
 	_instance_by_node[node] = id
@@ -1814,6 +2126,9 @@ func _verify_scalars(snapshot: Dictionary, problems: Array[String]) -> void:
 			problems.append("%s view=%d engine=%d" % [key, int(model[key]), expected])
 
 
+## A lane is right when the view agrees on BOTH whether it is revealed and which lane it
+## is: the id is the part a hidden-info leak would actually expose, and a view that
+## showed a lane the snapshot still calls "" would pass a revealed-only check.
 func _verify_lanes(snapshot: Dictionary, problems: Array[String]) -> void:
 	for lane: Dictionary in snapshot.get("lanes", []):
 		var col := int(lane.get("col", -1))
@@ -1821,6 +2136,10 @@ func _verify_lanes(snapshot: Dictionary, problems: Array[String]) -> void:
 		var got: bool = col >= 0 and col < _lanes_revealed.size() and bool(_lanes_revealed[col])
 		if got != expected:
 			problems.append("lane %d revealed view=%s engine=%s" % [col, got, expected])
+		var engine_id := str(lane.get("lane_id", ""))
+		var view_id := "" if col < 0 or col >= _lane_ids.size() else str(_lane_ids[col])
+		if view_id != engine_id:
+			problems.append("lane %d id view='%s' engine='%s'" % [col, view_id, engine_id])
 
 
 func _verify_players(snapshot: Dictionary, problems: Array[String]) -> void:
@@ -1839,7 +2158,21 @@ func _verify_players(snapshot: Dictionary, problems: Array[String]) -> void:
 		if view_deck != int(entry.get("deck_count", 0)):
 			problems.append("player %d deck count view=%d engine=%d" % [
 				pid, view_deck, int(entry.get("deck_count", 0))])
-
+		# ended_turn is public (TURN_ENDED reaches both viewers), so BOTH players are
+		# checked, not just the local one: the opponent's flag is what the view uses to
+		# know the round is waiting on the other peer.
+		if entry.has("ended_turn"):
+			var view_ended := bool(_ended_turn.get(pid, false))
+			if view_ended != bool(entry["ended_turn"]):
+				problems.append("player %d ended_turn view=%s engine=%s" % [
+					pid, view_ended, bool(entry["ended_turn"])])
+		# The engine's own undo depth for the local player. A mismatch here means the
+		# view's _own_undo_count drifted, which would leave Undo enabled with nothing to
+		# undo (or hide it when there is).
+		if pid == local_player and entry.has("undo_count"):
+			if _own_undo_count != int(entry["undo_count"]):
+				problems.append("undo_count view=%d engine=%d" % [
+					_own_undo_count, int(entry["undo_count"])])
 
 func _verify_hands(snapshot: Dictionary, problems: Array[String]) -> void:
 	for entry: Dictionary in snapshot.get("players", []):
@@ -1928,17 +2261,25 @@ func _verify_board(snapshot: Dictionary, problems: Array[String]) -> void:
 		var view_power := int(model.get("power", 0))
 		if power != null and view_power != int(power):
 			problems.append("power #%d: view=%d engine=%d" % [id, view_power, int(power)])
+		# cost and keywords are null on a hidden row in M5a (an opponent's face-down card
+		# keeps no identity, and a cost is an identity). A null means the engine is
+		# telling this viewer it knows nothing, which is not something to compare — the
+		# same way a null card_id is not a mismatch above. Comparing it as 0 would report
+		# a leak fix working correctly as a bug.
+		var cost: Variant = row.get("cost", null)
 		var view_cost := int(model.get("cost", 0))
-		if view_cost != int(row.get("cost", 0)):
-			problems.append("cost #%d: view=%d engine=%d" % [id, view_cost, int(row.get("cost", 0))])
-		var engine_keywords: Array = []
-		engine_keywords.assign(row.get("keywords", []))
-		var view_keywords: Array = []
-		view_keywords.assign(_card_data_keywords(view_card))
-		view_keywords.append_array(model.get("keywords", []))
-		if engine_keywords != view_keywords:
-			problems.append("keywords #%d: view=%s engine=%s" % [
-				id, str(view_keywords), str(engine_keywords)])
+		if cost != null and view_cost != int(cost):
+			problems.append("cost #%d: view=%d engine=%d" % [id, view_cost, int(cost)])
+		var shown_keywords: Variant = row.get("keywords", null)
+		if shown_keywords != null:
+			var engine_keywords: Array = []
+			engine_keywords.assign(shown_keywords)
+			var view_keywords: Array = []
+			view_keywords.assign(_card_data_keywords(view_card))
+			view_keywords.append_array(model.get("keywords", []))
+			if engine_keywords != view_keywords:
+				problems.append("keywords #%d: view=%s engine=%s" % [
+					id, str(view_keywords), str(engine_keywords)])
 
 
 func _verify_pending_swaps(snapshot: Dictionary, problems: Array[String]) -> void:

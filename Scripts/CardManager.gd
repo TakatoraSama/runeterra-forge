@@ -42,11 +42,13 @@ var _swap_drag_origin_zone: Vector2i = Vector2i(-1, -1)  # The zone the Elusive 
 var _pending_opponent_swaps: Array = []  # Deferred opponent swap data [{card_id, from_col, to_col}] — applied at SWAP_LANE phase
 
 
-# ── Engine mode (offline vs bot on the Match engine) ─────────────────────────
-# Every branch below is inert unless a MatchController has started; online/LAN
-# and `--engine=old` keep running the code above untouched. In engine mode this
-# script only turns input into intents and reads engine state for the checks the
-# engine still wants done client-side (see CONTRACT-M4 §C).
+# ── Engine mode (offline / LAN on the Match engine) ──────────────────────────
+# Every branch below is inert unless a MatchController has started; `--engine=old` keeps
+# running the code above untouched. In engine mode this script only turns input into
+# intents and asks the PRESENTER whether the move is allowed. It deliberately does NOT
+# read controller.state: a guest holds no MatchState, so every gate here has to be
+# answerable from the view. Offline is unaffected (local 1, the view answers true for
+# exactly the same cases the engine would).
 
 const TOAST_FADE_TIME := 1.5
 const TOAST_FONT_SIZE := 26
@@ -67,38 +69,38 @@ func _match_presenter() -> Node:
 	return null
 
 
-## The engine's CardState for a card node, or null when the card is not one the
-## presenter tracks (preview cards, or no controller at all).
-func _engine_card_state(card) -> Variant:
-	var controller := _match_controller()
+## The engine instance id a card node stands for, or -1 when the presenter has none for
+## it (a preview card, a card the view only knows face-down, or no presenter at all).
+func _engine_instance_id(card) -> int:
 	var presenter := _match_presenter()
-	if not controller or not presenter:
-		return null
-	var instance_id: int = presenter.instance_of(card)
-	if instance_id < 0:
-		return null
-	return controller.state.card(instance_id)
+	if presenter == null:
+		return -1
+	return int(presenter.call("instance_of", card))
 
 
-## Engine mode gate for swap-dragging a board card: the card must be ours,
-## resolved and Elusive, and must not have a swap queued yet. Stun is NOT checked
-## here — the engine rejects a stunned swap with reason "stunned", which the
-## presenter turns into a toast and a snap back.
+## The screen row the LOCAL player's cards sit on. The board has no absolute ids: this
+## script's old engine branches compared the drop row against local_player_id, which
+## put a host's own plays on the wrong half of the board once the host became absolute
+## player 0. Presenting local == bottom is the whole point of the mapping, so the row
+## is a constant here rather than something derived per drop.
+const ENGINE_OWN_ROW := 1
+
+
+## Engine mode gate for swap-dragging a board card: the card must be ours, resolved and
+## Elusive, not stunned, with no swap queued yet — the presenter's view model answers
+## all of that, which is what lets a guest with no MatchState drag its own Elusive.
+## Stun is deliberately NOT excluded: the engine rejects a stunned swap with reason
+## "stunned", which the presenter turns into a toast and a snap back. The presenter
+## does check it (so a stunned card does not start a drag), and the engine stays the
+## authority on the final word.
 func _engine_can_start_swap_drag(card) -> bool:
-	var controller := _match_controller()
-	var state = _engine_card_state(card)
-	if state == null:
+	var presenter := _match_presenter()
+	if presenter == null:
 		return false
-	if state.owner != int(controller.local_player):
+	var instance_id := _engine_instance_id(card)
+	if instance_id < 0:
 		return false
-	if not state.is_resolved:
-		return false
-	if not state.has_keyword("Elusive"):
-		return false
-	for entry in controller.state.pending_swaps:
-		if int(entry.get("instance_id", -1)) == state.instance_id:
-			return false
-	return true
+	return bool(presenter.call("can_start_swap", instance_id))
 
 
 ## Small centred message under the cards, fading out (engine mode only).
@@ -322,14 +324,15 @@ func _finish_swap_drag_engine() -> void:
 	SWAP_LANE phase and the presenter animates it), an invalid one snaps back."""
 	_is_swap_drag = false
 	var controller := _match_controller()
-	var presenter := _match_presenter()
-	var instance_id: int = presenter.instance_of(card_being_dragged) if presenter else -1
+	var instance_id := _engine_instance_id(card_being_dragged)
 	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	var dest_zone: Vector2i = board_reference.get_zone_for_slot(dest_slot) if dest_slot else Vector2i(-1, -1)
-	# Valid destination: our own row, a different column, a lane (not the spell zone)
+	# Valid destination: our own row, a different column, a lane (not the spell zone).
+	# The row is the SCREEN row, so ENGINE_OWN_ROW and not local_player_id — a host is
+	# absolute player 0 and its cards belong on the bottom row all the same.
 	if instance_id >= 0 \
 			and dest_zone != Vector2i(-1, -1) \
-			and dest_zone.y == int(controller.local_player) \
+			and dest_zone.y == ENGINE_OWN_ROW \
 			and dest_zone.x != _swap_drag_origin_zone.x \
 			and dest_zone.x >= 0:
 		card_being_dragged = null
@@ -453,13 +456,14 @@ func _finish_drag_engine() -> void:
 	engine decides the rest (mana, card type, lane, turn) and the presenter either
 	places the card or hands it back on intent_rejected."""
 	var controller := _match_controller()
-	var presenter := _match_presenter()
 	var card = card_being_dragged
-	var instance_id: int = presenter.instance_of(card) if presenter else -1
+	var instance_id := _engine_instance_id(card)
 	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	var zone_key: Vector2i = board_reference.get_zone_for_slot(dest_slot) if dest_slot else Vector2i(-1, -1)
-	if instance_id < 0 or zone_key == Vector2i(-1, -1) or zone_key.y != int(controller.local_player):
-		if zone_key != Vector2i(-1, -1) and zone_key.y != int(controller.local_player):
+	# ENGINE_OWN_ROW, not local_player_id: the drop row is a screen row, and a host is
+	# absolute player 0 whose cards belong on the bottom row all the same.
+	if instance_id < 0 or zone_key == Vector2i(-1, -1) or zone_key.y != ENGINE_OWN_ROW:
+		if zone_key != Vector2i(-1, -1) and zone_key.y != ENGINE_OWN_ROW:
 			_show_toast("Play on your side")
 		_return_card_to_hand()
 		return
