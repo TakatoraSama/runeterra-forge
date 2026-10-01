@@ -18,7 +18,7 @@ Where the card text and the code disagree, **the code is the source of truth**.
 | **0. Upgrade to Godot 4.7** | ✅ **Done**: Godot 4.7.2, commit `63570fe` on `upgrade/godot-4.7`. No regressions vs the 4.6 baseline. Manual GUI smoke test + Windows export still pending | Engine migration (§0) | Low risk. All later work (particles, shaders, new scenes) is built on the target version | S |
 | **1. Critical fixes (cheap ones only)** | ✅ **Done**: commit `088f423` (branch `fix/phase-1-critical`, merged into `upgrade/godot-4.7`). `tools/lan_selftest.sh` passes (and fails with the old seed formula). Manual GUI check (F9 Stun, spell badge) + a LAN match with real plays still pending | Seed fix, cosmetic RNG split, per-match reset of singletons, keyword badge path bug (§1.1 a+d, §1.6), plus a found bug: `CardSpell.tscn` had no script attached. Adds debug-only auto-connect flags (`--autohost`, `--autojoin=<ip>`, `--autoendturn`, `--quit-on-end`), `[SYNC]` log lines, and `tools/lan_selftest.sh` to test LAN sync unattended | Correctness first. The other desync fixes (§1.1 b, c, e) are **superseded by Phase 3**, so don't hand-write mirror RPCs | S |
 | **2. Quick wins** | ✅ **Done**: branch `phase2/integration` (merged into `upgrade/godot-4.7`). Offline smoke x3 + `tools/lan_selftest.sh` x2 pass. Manual GUI check (Deck Builder save/restart/load, Xerath2/Janna2/Rumble2 in a match, undo, recall+Stun, MiniCard sizing) + a LAN match with real plays still pending | Saved decks used in matches, text/code mismatches, undo tracker, MiniCard SubViewport warning (§1.2, §1.5, §1.6). **Planned and shipped:** saved decks reach a match (§1.2); §1.5 fixed against the card text — **Xerath2 back-row only**, **Janna2 passive applies to every draw including bot draws**, **Rumble2 grants the Augment badge**, plus the Ice Pillar mana ramp; undo drops stale `summoned_cards`; recall clears Stun; the MiniCard SubViewport warning is gone. **Extras found while in there:** the active deck is persisted in `user://active_deck.json`; Deck Builder *load* sets the active deck; only full 12-card decks are used in a match (otherwise the default deck); undo restores hand glow; the Augment sprite path is fixed | Small, visible improvements for players | S |
-| **3. Multiplayer rework: host runs the rules** | 🔄 In progress. **M1 Foundation ✅** (`45df9e1`). **M2 Rules core ✅** (`68f60ac`). **M3 Abilities ✅** (`9596f52`). **M4 Presenter + offline switch ✅ implemented** (commit `8f73034`, on `upgrade/godot-4.7`): **offline vs bot now runs on the new engine** — `MatchController` (host + bot + intents) and `MatchPresenter` (engine events → the existing visuals/animations, fed only redacted events); `MatchSnapshot.for_viewer`; `--engine=old` keeps the old offline path until M5; online/LAN unchanged. `tools/offline_selftest.sh` (autoplay + `--verify-view`) green on 9 seeds; 513 tests. Manual GUI check pending. Next: M5 Online | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
+| **3. Multiplayer rework: host runs the rules** | 🔄 In progress. **M1 Foundation ✅** (`45df9e1`). **M2 Rules core ✅** (`68f60ac`). **M3 Abilities ✅** (`9596f52`). **M4 Presenter + offline switch ✅** (`8f73034`). **M5a LAN on the new engine ✅ done**: the host runs `MatchRules` inside a `MatchHost` session layer, the guest holds **no** `MatchState` and only sends intents; `MatchNet` is the only file with an `@rpc` (5 RPCs incl. the `hello` join handshake) and the only place that touches the MultiplayerAPI. Hidden-info fixes (lanes reveal only when revealed, opponent mana static during PLAY, face-down cards carry no cost/keywords/power, rejections to the sender alone, `MatchLeakCheck` over every guest batch), `presentation_done` gating with a 10 s ack timeout, disconnect = clean "Opponent disconnected" + Back to lobby, deck sync in `hello`, and the whole old mirror-RPC network deleted. `tools/lan_selftest.sh` now plays **real cards on both peers**: **5/5 seeds PASS** (`1 2 3 42 777`, all nine criteria each); `tools/offline_selftest.sh` 6/6; **612 tests**. **Manual GUI LAN check still pending.** Next: **M5b** — delete the old engine and `--engine=old`, after the user has played a LAN match | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events | L |
 | **4. VFX foundation + status effects** | Planned (Stun ✅ shipped) | Generalise the Stun pattern. Elusive float, Deep glow (§2.1, §2.2) | Reuses shipped code. Status effects read card state, so they can start during Phase 3 | M |
 | **5. Event effects** | Planned | Play/flip, kill, discard, recall, create, summon, swap, lane reveal, Sun Disc (§2.3), each as a handler for one event type | One presenter handler per event (Phase 3) | M |
 | **6. Cinematics** | Planned | Trundle ice pillar, level-up cinematic (§2.4) | Biggest visual effort. Needs Phases 3–5 | L |
@@ -87,7 +87,13 @@ Phase 2 and Phase 4 can overlap with Phase 3. Phase 7 is ongoing: pick one champ
 
 > In Phase 1, only fix **a** (seed) and **d** (RNG split): they're a few lines each and keep LAN games playable until the rework lands.
 > **b**, **c** and **e** exist because both clients simulate the match. The Phase 3 host-authoritative rework (Part 3) removes that, so don't spend time on new mirror RPCs.
+>
+> ✅ **b, c and e are resolved for LAN by M5a** (§3.10): there is now one engine on the host, so
+> an owner-only effect produces an event both peers receive, and there is no mirror RPC left to
+> write or to desync. **a** and **d** were fixed in Phase 1 and only ever mattered because of the
+> dual simulation.
 
+**Status: b, c and e resolved for LAN by M5a**; a and d fixed in Phase 1. The table below is kept as the record of what used to break.
 Both clients simulate resolve locally. Every random pick must use the **same seed**, and every effect run only by the owner must be **mirrored by an RPC**. Five places break this:
 
 | # | Problem | Where | Fix |
@@ -163,9 +169,9 @@ Decide which one is right, then fix the other:
 
 - **The documented headless smoke test never leaves the lobby.** `--headless … res://Scenes/Main.tscn -- --autoendturn --quit-on-end` hung at the lobby, because `GameManager._ready()` did not auto-start and `LobbyUI` only started on Host/Join/Offline. ✅ **(a) Resolved** in M4 by the dev flags `--offline`, `--autoplay`, `--verify-view`, `--seed`, `--fast`, `--engine=old` plus `tools/offline_selftest.sh`, which plays whole headless matches and checks the view.
 - **`tools/lan_selftest.sh` needs two workarounds on Windows.** `timeout` resolved to `C:\WINDOWS\system32\timeout.exe` instead of GNU coreutils, and the script had to be launched with `sh` (direct execution fails with `%1 is not a valid Win32 application`, and `bash` silently drops the `G47` environment variable). ✅ **(b) Resolved**: all three scripts now go through `tools/_env.sh`, which loads the gitignored `tools/local.env` (see `tools/local.env.example`) and puts Git's `/usr/bin` first on `PATH`; the scripts' `G47` defaults are unchanged.
-- **`lan_selftest.sh` never plays a card.** Both peers auto-end every turn, so lanes stay `[0,0,0]`; the test covers turn/lane/seed sync but not card-play sync. ⏳ **(c) Moved to M5**, where `lan_selftest` gains an auto-play mode with real card plays.
+- **`lan_selftest.sh` never plays a card.** Both peers auto-end every turn, so lanes stay `[0,0,0]`; the test covers turn/lane/seed sync but not card-play sync. ✅ **(c) Resolved** in M5a: `lan_selftest` autoplays **real card plays on both peers** (host via `MatchBot.decide`, guest via `MatchBot.decide_from_snapshot`), and each seed asserts ≥1 `[PLAY]` for *each* player plus per-viewer redaction via byte-identical `[NET-OUT]`/`[NET-IN]` wire lists. 5/5 seeds pass.
 - **`summoned_cards` entries keep the lv1 `card_id` / level-up checks don't filter on `is_resolved`.** ✅ **(d) and (e) Fixed** in the new engine on `upgrade/godot-4.7` (10 new scenario/tracker tests): (d) In the new engine Azir/Irelia only check at level 1, so self-counting after a level-up can't happen; they now exclude only their own instance, so a second copy of the same champion counts as an ally. (e) Azir, Irelia, Kennen and Trundle now count only revealed summons, like Sion, so a level-up happens right after the triggering card flips. New engine only — the old LevelUpManager is deleted in M5.
-- **Each LAN peer plays its own locally active deck.** Nothing syncs the deck, so two players with different active decks play different decks. ⏳ **(f) Moved to M5** (deck sync, §3.9).
+- **Each LAN peer plays its own locally active deck.** Nothing syncs the deck, so two players with different active decks play different decks. ✅ **(f) Resolved** in M5a: the guest sends its deck card ids in the `hello` join handshake and the host validates them with `MatchDecks.sanitize` (exactly 12 known ids, else the default deck) — see §3.8.
 
 ### 1.7 Suggested fix order
 
@@ -408,16 +414,34 @@ The host filters every event per recipient before sending:
 
 ### 3.8 Network layer (ENet stays)
 
-Keep `NetworkManager` (ENet, port 9999, 2 players) and replace the ~20 RPCs with **four**, in a new `MatchNet` node:
+Keep `NetworkManager` (ENet, port 9999, 2 players) and replace the ~20 RPCs with **five**, in a new `MatchNet` node:
 
 | RPC | Direction | Payload |
 |---|---|---|
 | `submit_intent(intent: Dictionary)` | guest → host | `{type, …fields}` |
-| `receive_events(events: Array)` | host → guest | array of `{type, …fields}` Dictionaries (plain data only, no Objects) |
+| `receive_events(events: Array, seq: int)` | host → guest | array of `{type, …fields}` Dictionaries (plain data only, no Objects) |
 | `receive_snapshot(snapshot: Dictionary)` | host → guest | filtered full state (join / reconnect) |
 | `presentation_done(turn: int)` | guest → host | – |
+| `hello(payload: Dictionary)` | guest → host | **the 5th RPC, added in M5a:** the join handshake `{protocol, deck, want_snapshots}` |
 
 The host calls its own `MatchRules` and presenter directly; there's no loopback RPC.
+
+**`hello` — why a 5th RPC (M5a).** Session control is deliberately kept out of the intent
+stream, so the rules engine never has to validate it: the rules only ever see playable intents.
+The guest sends `hello` once, from `multiplayer.connected_to_server`; the host answers with the
+static `MatchHost.check_hello(payload)` (`{ok, reason, deck, want_snapshots}`), which validates
+the protocol version, rejects a second guest, and sanitises the deck with the same
+`MatchDecks.sanitize` rule as an offline saved deck. On success the host emits `guest_ready` and
+starts the match; on refusal it puts a `session_ended(reason)` event into a normal
+`receive_events` batch (the guest is told through the event stream, not a host-only signal) and
+drops the peer about 2 s later. **The host's deck and the match seed never leave the host.**
+
+**Identity rule:** the player id always comes from the **sender**, never from the payload.
+`submit_intent` and `presentation_done` carry no player field, so a guest cannot play as the
+host by sending `{"player": 0}` — an intent that names one is dropped unread.
+
+**Disconnect (M5a):** a drop ends the match cleanly — "Opponent disconnected" + Back to lobby
+(`session_ended`). No reconnect yet; that is M6.
 
 **LAN discovery** (`LanDiscovery.gd`):
 - While hosting, broadcast a small UDP beacon every second with `PacketPeerUDP` and `set_broadcast_enabled(true)`, for example on port 9998: `{"game": "RuneterraForge", "name": host_name, "port": 9999, "version": …}`.
@@ -434,7 +458,7 @@ The host calls its own `MatchRules` and presenter directly; there's no loopback 
 ### 3.9 Migration steps (revised for Phase 3 kickoff)
 
 **Decisions (Phase 3 kickoff):**
-- **Parallel engine + switch.** The new engine is built in `Scripts/Match/` *next to* the old code, which keeps working until the switch. Offline moves first (M4), then online (M5); the old engine and its RPCs are deleted in M5.
+- **Parallel engine + switch.** The new engine is built in `Scripts/Match/` *next to* the old code, which keeps working until the switch. Offline moves first (M4), then online (M5a); the old engine and its RPCs are deleted in **M5b**, after the user has played a LAN match on M5a.
 - **Opponent plays stay hidden until RESOLVE** (current behaviour): the host sends nothing about them before then.
 - **Process:** one worktree + branch per milestone (`phase3/mN-…`), started from `upgrade/godot-4.7`. Claude commits after review; the user checks and pushes, then the branch is fast-forwarded into `upgrade/godot-4.7`.
 - **Tests:** a small built-in headless runner (`tools/run_tests.sh` → `Tests/run_all.gd`), no addon. Scenario tests drive `MatchRules` directly. **On Windows**, copy `tools/local.env.example` to `tools/local.env` (it holds the Godot path) and run the scripts from Git Bash with `sh`, e.g. `sh tools/run_tests.sh` — direct execution and WSL's `bash` both misbehave; `tools/_env.sh` handles the rest.
@@ -447,27 +471,44 @@ The host calls its own `MatchRules` and presenter directly; there's no loopback 
 | **M2** | Rules core (no card abilities) | Setup + shuffle, Game Start hook, turn/mana loop (incl. temporary bonus), draw/Deep, play/undo/swap intents with every `finish_drag` rule, resolve order (flip-first), reveal, round end, priority, lane assignment/reveal + the 5 lane effects, game end winner; bot decision → intents | No | Test output |
 | **M3** | Abilities | Port all `AbilityResolver` handlers, kill/summon flows, death prevention, Last Breath, behold, trackers, `LevelUpManager` (incl. global upgrade + Sun Disc), `AuraSystem`, Stun, swap-arrive. Scenario tests per ability | No | Test output |
 | **M4** | Presenter + offline switch | `MatchPresenter` plays events through the existing card views and animations; input → intents; the bot runs on the engine; offline uses the new engine (`--engine=new`, then by default) | **Yes (offline)** | GUI play vs bot |
-| **M5** | Online | `MatchNet` (4 RPCs), per-recipient filtering, start snapshot, `presentation_done` gating; `lan_selftest` gains auto-play with real plays; **delete the old engine + old RPCs** (§3.10) | **Yes (online)** | LAN match |
+| **M5a** | Online (LAN on the new engine) | `MatchHost` session layer around `MatchRules` (per-viewer redaction, `play_opened` gating + `presentation_done` acks with a 10 s timeout, rejection routing); `MatchNet` (**5** RPCs incl. the `hello` join handshake), per-recipient filtering, snapshots, perspective (`_row(owner)`), disconnect handling; hidden-info fixes + `MatchLeakCheck`; **delete the old networking** (§3.10). `lan_selftest` gains auto-play with real plays | **Yes (online)** | LAN match |
+| **M5b** | Delete the old engine | Delete the old node engine and its autoloads (AbilityResolver, LevelUpManager, AuraSystem, LaneManager, SwapLaneManager, StunManager, BotManager), `--engine=old` and `--autoendturn`; `CardManager`/`Card`/`CardLandmark` become input/view only; the §3.10 items kept until now | Yes (removes the fallback path) | Offline + LAN still work |
 | **M6** | LAN polish | UDP host discovery + version handshake; optional reconnect + event logs | Yes (lobby) | Lobby check |
 
-**M5 detail:**
-- `lan_selftest` gains an auto-play mode with real card plays on both peers. Each peer runs `--verify-view`, and the host's and guest's event logs (per-viewer redaction applied) must match the engine. This replaces the current "auto-end only" check.
-- **Deck sync:** the guest sends its deck card ids in the join handshake; the host validates it with the same rule as offline (`MatchController.human_deck_ids`: exactly 12 known card ids, else the default deck) and passes both decks to `MatchSetup.new_match`. The guest never sees the host's list.
+**M5a detail (done):**
+- `lan_selftest` autoplays **real card plays on both peers** (host with `MatchBot.decide`, guest with `MatchBot.decide_from_snapshot`). Each peer runs `--verify-view`, and the guest's `[NET-IN]` stream must equal the host's `[NET-OUT]` byte for byte. Per seed: both peers exit 0, no script errors, ≥1 `[VIEW] ok` and 0 `[VIEW-MISMATCH]` each side, one `[MATCH] game_ended` with the same winner, both wire lists equal and non-empty, 0 `[LEAK]`, 0 `[NET] ack timeout`, and ≥1 `[PLAY]` for **each** player. **Result: 5/5 seeds PASS** (`1 2 3 42 777`).
+- **Deck sync:** the guest sends its deck card ids in the `hello` handshake; the host validates them with the same rule as an offline saved deck (`MatchDecks.sanitize`: exactly 12 known card ids, else the default deck) and passes both decks to `MatchSetup.new_match`. The guest never sees the host's list.
+
+**M5b detail (planned):**
+- Remove the old engine from `project.godot`'s autoloads and delete the scripts; first drop their remaining references from `BoardGeneration.create_lanes_from_ids`, `Card*.gd`, `Deck.gd` and `CardManager.gd`.
+- Delete `--engine=old` and `--autoendturn`; shrink `GameManager` to the End Turn pass-through or fold it into `MatchController`.
+- Verify: `run_tests`, `offline_selftest`, `lan_selftest`, a clean headless import, and a grep for every deleted identifier.
 
 Useful first scenario tests (M3): Rumble's discard brackets; Nasus vs Tryndamere death prevention; the Azir aura pushing Renekton to his level-up; the three Game End passes; Sion's lane choice from hand.
 
-### 3.10 Deleted in M5
+### 3.10 Deleted in M5a / kept until M5b
 
-- `seed(...)` calls in `GameManager`, and the `_local_rng` vs global split in `AbilityResolver`.
+**Deleted in M5a ✅** — the whole mirror-RPC network, so both peers no longer simulate:
+
+- `seed(...)` calls in `GameManager` and the `_shared_seed()` / `[SYNC]` logging.
 - Resolve lockstep: `_receive_card_resolve_done`, `_wait_for_opponent_card_resolve`, `_card_resolve_done_signals`.
 - Swap sync: `_rpc_notify_swap_step_done`, `SwapLaneManager._swap_step_done` / `_swap_steps_received`.
 - Every `_receive_opponent_*` mirror in `CardManager` and `AbilityResolver`, and `_receive_undo_all_plays`.
-- `sync_hand_data`, `_receive_opponent_hand_ids`, `BeheldCardProxy`, `opponent_hand_card_ids`.
-- `_pending_opponent_cards`, `_pending_opponent_swaps` and `apply_pending_opponent_swaps` (replaced by events).
-- Owner-gating checks throughout `AbilityResolver` and `LevelUpManager`.
-- `GameManager._sync_flip_first` perspective mapping, `_local_to_network_player`, and the unused `NetworkManager` zone converters.
+- `sync_hand_data`, `_receive_opponent_hand_ids`, `BeheldCardProxy`, `opponent_hand_card_ids` — the whole-hand leak.
+- `_pending_opponent_swaps` and `apply_pending_opponent_swaps` (replaced by events).
+- `GameManager._sync_flip_first` / `_sync_lane_assignment` / `_on_player_end_turn` RPCs, `_local_to_network_player`, and the unused `NetworkManager` zone converters, player maps and assignment RPCs.
+- `NetworkManager` is now only the peer: `create_server(port, 1)` plus `close()`.
+- `_receive_opponent_card_play` became the plain method **`queue_opponent_card_play`** (see below).
 
-This also resolves §1.1 b, c and e without writing any mirror RPCs.
+**Kept until M5b**, because the old engine's `--engine=old` offline path still runs them:
+
+- `CardManager.queue_opponent_card_play`, `_pending_opponent_cards` and `_spawn_pending_opponent_cards` — the **old offline bot** plays through these. On LAN nothing sends them any more; the opponent's plays arrive as engine events.
+- Owner-gating checks in `AbilityResolver` and `LevelUpManager` — still needed by the old engine, where the bot is player 0 and the human player 1.
+- `AbilityResolver._local_rng` — the old resolve phase still seeds the global RNG.
+
+**This resolves §1.1 b, c and e for LAN without writing any mirror RPCs**: with one engine on the
+host, an owner-only effect simply produces an event both peers receive, so there is nothing left
+to mirror and nothing left to desync.
 
 ---
 
