@@ -89,6 +89,10 @@ var _view_built: bool = false
 ## state. It is stream-based — it learns which opponent instances have legitimately
 ## been revealed — so it is built once per session and outlives every batch.
 var _leak_check: MatchLeakCheck = null
+## Guest deliveries that arrived before the leak checker existed, in delivery order,
+## replayed once _start_leak_check() runs. Only the CHECK waits; the guest still
+## received every one of these the moment they were produced.
+var _leak_pending: Array = []
 
 ## The bot's own randomness, kept apart from the match RNG so the engine's replay is
 ## untouched. Both are seeded from the match seed, so a --seed run replays exactly.
@@ -368,6 +372,8 @@ func start_host(p_net: Node, host_deck: Array, guest_deck: Array, want_snapshots
 	_started = true
 	_session_ended = false
 	_acked_turn = -1
+	_leak_check = null
+	_leak_pending.clear()
 
 	if presenter == null:
 		presenter = _find_presenter()
@@ -583,8 +589,12 @@ func _verify_view_now() -> void:
 			return
 		reference = _latest_snapshot
 	elif host != null:
+		# No leak check here: the checker guards the GUEST (viewer 1) and this is the
+		# host's own picture of viewer 0. Feeding it a snapshot the guest never receives
+		# would judge the host's own view by the guest's rules, and it is already covered
+		# — every snapshot that actually goes to the guest is checked in
+		# _deliver_snapshot.
 		reference = host.snapshot_for(local_player)
-		_check_snapshot_for_leaks(reference)
 	else:
 		return
 	var issues: Array = presenter.call("verify", reference)
@@ -701,8 +711,12 @@ func _log_play(intent: Dictionary) -> void:
 ## Runs one guest batch past the leak check and prints anything it finds. The guest's
 ## stream is the one that matters: it is the only traffic a second party ever sees, and
 ## every hidden-information bug in M5 is a batch that says too much.
+##
+## With no checker yet (the window before _start_leak_check) the batch is BUFFERED
+## rather than dropped — see _buffer_for_leak_check.
 func _check_batch_for_leaks(events: Array) -> void:
 	if _leak_check == null:
+		_buffer_for_leak_check("batch", events)
 		return
 	_print_leaks(_leak_check.check_batch(events))
 
@@ -712,19 +726,48 @@ func _check_batch_for_leaks(events: Array) -> void:
 ## mana moving mid-PLAY.
 func _check_snapshot_for_leaks(snapshot: Dictionary) -> void:
 	if _leak_check == null:
+		_buffer_for_leak_check("snapshot", snapshot)
 		return
 	_print_leaks(_leak_check.check_snapshot(snapshot))
+
+
+## Holds one guest delivery until the checker exists.
+##
+## The checker cannot be built until MatchHost.start() has run, and start() already
+## delivers the opening snapshot and the opening event batch — which is where
+## lane_assigned lives, the one event the checker most has to see. Checking on arrival
+## would therefore skip exactly the traffic that matters most, so anything delivered in
+## that window is kept and replayed in delivery order by _start_leak_check.
+## Only the CHECK is deferred: the batch still goes to the guest immediately, because
+## holding it would freeze the match waiting on a debug-only auditor.
+func _buffer_for_leak_check(kind: String, payload: Variant) -> void:
+	if not OS.is_debug_build():
+		return
+	_leak_pending.append({"kind": kind, "payload": payload})
 
 
 ## The checker guards ONE viewer against the live state, so it is built once per
 ## session (it learns which opponent instances have legitimately been revealed and has
 ## to carry that across batches) and it watches the GUEST — the host's own view is this
 ## machine's screen. Debug builds only: it re-derives the truth for every event.
+##
+## Replays whatever was delivered to the guest before this point, IN DELIVERY ORDER:
+## the checker is stream-based, so the opening snapshot has to be judged before the
+## first batch, and the first batch before the first play_opened release. Replaying out
+## of order would teach it the wrong thing about what was public when.
 func _start_leak_check() -> void:
 	_leak_check = null
 	if not OS.is_debug_build() or host == null:
+		_leak_pending.clear()
 		return
 	_leak_check = MatchLeakCheck.new(host.state, 1)
+	var pending: Array = _leak_pending.duplicate()
+	_leak_pending.clear()
+	for item: Dictionary in pending:
+		if str(item.get("kind", "")) == "batch":
+			_print_leaks(_leak_check.check_batch(item.get("payload", [])))
+		else:
+			_print_leaks(_leak_check.check_snapshot(item.get("payload", {})))
 
 
 func _print_leaks(problems: Array) -> void:
