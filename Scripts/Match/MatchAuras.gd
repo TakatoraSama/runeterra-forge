@@ -83,7 +83,9 @@ static func recalculate(ctx: MatchAbilities) -> void:
 		var new_power: int = card.get_current_power()
 		if new_power == int(old_power[id]):
 			continue
-		ops.emit_event(MatchEvents.power_changed(id, new_power - int(old_power[id]), new_power))
+		# Through the card, so an aura cannot announce the new power of an opponent's
+		# face-down card (MatchOps.emit_card_event applies the hidden-card rule).
+		ops.emit_card_event(MatchEvents.power_changed(id, new_power - int(old_power[id]), new_power), id)
 	for id in hand_ids:
 		var card := state.card(id)
 		if card == null:
@@ -92,8 +94,7 @@ static func recalculate(ctx: MatchAbilities) -> void:
 		if new_cost == int(old_cost[id]):
 			continue
 		var event := MatchEvents.cost_changed(id, new_cost - int(old_cost[id]), new_cost)
-		event["private_to"] = card.owner
-		ops.emit_event(event)
+		ops.emit_card_event(event, id)
 
 
 # ─── Individual aura implementations ─────────────────────────────────────────────

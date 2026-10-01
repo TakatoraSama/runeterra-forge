@@ -148,7 +148,8 @@ func summon(card_id: String, owner: int, col: int, creator_id: int = -1) -> int:
 		"created_at_turn": state.turn,
 		"instance_id": id,
 	})
-	emit_event(MatchEvents.card_summoned(owner, id, card_id, col, card.slot))
+	emit_event(MatchEvents.card_summoned(owner, id, card_id, col, card.slot,
+		card.get_current_power(), card.get_current_cost(), card.keywords()))
 	return id
 
 
@@ -211,15 +212,19 @@ func remove_keyword(id: int, keyword: String) -> void:
 	_emit_private(MatchEvents.keyword_removed(id, keyword), id)
 
 
-## Returns the player a still-hidden card (one in a hand or a deck) must be hidden
-## from, or -1 when the change is public. Cards on the board, and everything GONE,
-## are public: their identity is out in the open already.
+## Returns the player a still-hidden card must be hidden from, or -1 when the change is
+## public. A card in a hand or a deck was never shown; a card on the board (lane or
+## spell zone) that has NOT resolved is still face-down and just as secret. Once it
+## resolves, or once it is GONE, it is public: its identity is out in the open.
 func _private_to(id: int) -> int:
 	var card := state.card(id)
 	if card == null:
 		return -1
 	if card.location == CardState.Location.HAND or card.location == CardState.Location.DECK:
 		return card.owner
+	if not card.is_resolved:
+		if card.location == CardState.Location.BOARD or card.location == CardState.Location.SPELL_ZONE:
+			return card.owner
 	return -1
 
 
@@ -229,6 +234,15 @@ func _emit_private(event: Dictionary, id: int) -> void:
 	if viewer >= 0:
 		event["private_to"] = viewer
 	emit_event(event)
+
+
+## Publishes an event that concerns card `id` through the same hidden-card rule the stat
+## primitives use. This is the door for a module that builds its own event — MatchAuras
+## publishes one power_changed per board card whose total moved, and an aura must not
+## announce an opponent's face-down card's new power. Events about a card of the
+## viewer's own, or about a public one, go out unchanged.
+func emit_card_event(event: Dictionary, id: int) -> void:
+	_emit_private(event, id)
 
 
 ## Returns true when the card is currently stunned.
@@ -255,7 +269,10 @@ func lane_power(col: int, player: int) -> int:
 
 ## Spends `amount` from the player's pool and emits the new value. Returns false and
 ## changes nothing when they cannot afford it; a non-positive amount always succeeds.
-func spend_mana(player: int, amount: int) -> bool:
+## `hidden` tags the event with "private_to" = player: a spend that happens during PLAY
+## is a move the opponent must not watch happen (MatchRules passes it for play and
+## undo; the round's true pool is re-published at RESOLVE instead).
+func spend_mana(player: int, amount: int, hidden: bool = false) -> bool:
 	if amount <= 0:
 		return true
 	if not _is_player(player):
@@ -264,17 +281,27 @@ func spend_mana(player: int, amount: int) -> bool:
 	if p.current_mana < amount:
 		return false
 	p.current_mana -= amount
-	emit_event(MatchEvents.mana_changed(player, p.current_mana, p.get_max_mana()))
+	_emit_mana(player, hidden)
 	return true
 
 
 ## Gives `amount` back, never past the player's maximum, and emits the new value.
-func refund_mana(player: int, amount: int) -> void:
+## `hidden` means exactly what it does in spend_mana.
+func refund_mana(player: int, amount: int, hidden: bool = false) -> void:
 	if not _is_player(player):
 		return
 	var p := state.players[player]
 	p.current_mana = mini(p.current_mana + amount, p.get_max_mana())
-	emit_event(MatchEvents.mana_changed(player, p.current_mana, p.get_max_mana()))
+	_emit_mana(player, hidden)
+
+
+## The one mana_changed for `player`, private to them when `hidden` is set.
+func _emit_mana(player: int, hidden: bool) -> void:
+	var p := state.players[player]
+	var event := MatchEvents.mana_changed(player, p.current_mana, p.get_max_mana())
+	if hidden:
+		event["private_to"] = player
+	emit_event(event)
 
 
 ## Queues bonus mana that only becomes active at the start of the next turn; nothing
@@ -450,7 +477,8 @@ func put_into_play(id: int, col: int) -> bool:
 		"is_resolved": true,
 		"instance_id": id,
 	})
-	emit_event(MatchEvents.card_summoned(owner, id, card.card_id, col, card.slot))
+	emit_event(MatchEvents.card_summoned(owner, id, card.card_id, col, card.slot,
+		card.get_current_power(), card.get_current_cost(), card.keywords()))
 	return true
 
 

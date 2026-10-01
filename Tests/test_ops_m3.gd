@@ -556,7 +556,9 @@ func test_put_into_play_moves_a_hand_card_onto_the_board() -> void:
 		"is_resolved": true,
 		"instance_id": id,
 	}], "Sion counts it as a summoned ally")
-	assert_eq(_of_type(MatchEvents.CARD_SUMMONED), [MatchEvents.card_summoned(0, id, "Chip", 1, 0)])
+	assert_eq(_of_type(MatchEvents.CARD_SUMMONED), [MatchEvents.card_summoned(0, id, "Chip", 1, 0,
+		state.card(id).get_current_power(), state.card(id).get_current_cost(), state.card(id).keywords())],
+		"the summoned event carries the card's final numbers too")
 
 
 func test_put_into_play_appends_to_a_used_zone() -> void:

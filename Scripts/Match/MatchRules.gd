@@ -144,6 +144,10 @@ func _refresh_mana(p: int) -> void:
 	ps.base_max_mana = max(1, state.turn)
 	ps.current_mana = clamp(ps.current_mana, 0, ps.get_max_mana())
 	ps.current_mana = ps.get_max_mana()
+	# The pool nothing else has touched yet, which is what an opponent is shown while
+	# PLAY lasts: a spend is private (MatchOps.spend_mana hidden) and only re-published
+	# at RESOLVE, so this is the number the two views agree on for the whole turn.
+	ps.turn_start_mana = ps.current_mana
 	_emit(MatchEvents.mana_changed(p, ps.current_mana, ps.get_max_mana()))
 
 
@@ -227,7 +231,7 @@ func _play_card(player: int, intent: Dictionary) -> void:
 		_reject(player, type_name, "not_enough_mana", id)
 		return
 
-	ops.spend_mana(player, cost)
+	ops.spend_mana(player, cost, true)
 	var hand_index: int = state.players[player].hand.find(id)
 	state.remove_from_hand(player, id)
 	state.place_card(id, col, player)
@@ -287,7 +291,7 @@ func _undo(player: int) -> void:
 		state.players[player].hand.insert(index, id)
 		undone.append(id)
 
-	ops.refund_mana(player, refund)
+	ops.refund_mana(player, refund, true)
 	stack.clear()
 	var hand_after: Array = []
 	for id in state.players[player].hand:
@@ -340,11 +344,14 @@ func _swap_card(player: int, intent: Dictionary) -> void:
 
 
 ## end_turn {} — the round resolves once both players are done.
+## turn_ended is public: both sides need it to grey out their own End Turn button while
+## the round waits for the other player, and it is announced before the resolve starts.
 func _end_turn(player: int) -> void:
 	if state.players[player].ended_turn:
 		_reject(player, str(MatchIntents.END_TURN), "turn_ended")
 		return
 	state.players[player].ended_turn = true
+	_emit(MatchEvents.turn_ended(player))
 	for p in 2:
 		if not state.players[p].ended_turn:
 			return
@@ -366,6 +373,7 @@ func _resolve_round() -> void:
 	_execute_swaps()
 
 	_set_round_phase(MatchState.RoundPhase.RESOLVE)
+	_republish_hidden_mana()
 	_expire_stuns()
 	_resolve_played_cards()
 
@@ -430,7 +438,8 @@ func _resolve_played_cards() -> void:
 		if card == null or not _is_on_board(id):
 			continue
 		card.is_resolved = true
-		_emit(MatchEvents.card_revealed(card.owner, id, card.card_id, card.col, card.slot))
+		_emit(MatchEvents.card_revealed(card.owner, id, card.card_id, card.col, card.slot,
+			card.get_current_power(), card.get_current_cost(), card.keywords()))
 		_mark_summoned_entry_resolved(id)
 		abilities.on_play(id)
 		if str(card.data().get("Type", "")) == "Spell" and _is_on_board(id):
@@ -438,6 +447,23 @@ func _resolve_played_cards() -> void:
 			card.location = CardState.Location.GONE
 			_emit(MatchEvents.spell_resolved(card.owner, id))
 		abilities.after_change()
+
+
+## Re-publishes, once and publicly, the real mana pool of every player who still has a
+## card down this round. A play spends from a private pool and an undo refunds into it,
+## so during PLAY the opponent's numbers must not move — this is where they catch up,
+## at the same moment the cards they paid for are revealed.
+func _republish_hidden_mana() -> void:
+	var played: Array[bool] = [false, false]
+	for id in state.played_this_turn:
+		var card := state.card(id)
+		if card != null and card.owner >= 0 and card.owner < played.size():
+			played[card.owner] = true
+	for p in played.size():
+		if not played[p]:
+			continue
+		var ps: PlayerState = state.players[p]
+		_emit(MatchEvents.mana_changed(p, ps.current_mana, ps.get_max_mana()))
 
 
 ## Drops a stun that was applied on an earlier turn, and every stun whose card left
@@ -523,12 +549,16 @@ func _end_game() -> void:
 # Internals
 # ----------------------------
 
-## Emits one rejection. Only submit() flushes, so a rejection raised inside an intent
+## Emits one rejection, tagged with "private_to" so it reaches its sender alone: an
+## opponent has no business seeing which card the other player tried to move or why
+## the move was refused. Only submit() flushes, so a rejection raised inside an intent
 ## handler still reaches the caller of submit(). `instance_id` names the card the intent
 ## was about, or -1 for intents that name none (end_turn, undo), so a presenter can put
 ## that card back where it came from.
 func _reject(player: int, intent_type: String, reason: String, instance_id: int = -1) -> void:
-	_emit(MatchEvents.intent_rejected(player, intent_type, reason, instance_id))
+	var event := MatchEvents.intent_rejected(player, intent_type, reason, instance_id)
+	event["private_to"] = player
+	_emit(event)
 
 
 ## The instance_id an intent names, or -1 when it names none or the value is not a

@@ -7,6 +7,7 @@ var hand: Array[int] = []  # instance ids; index 0 = NEWEST card
 var base_max_mana: int = 1
 var bonus_max_mana: int = 0
 var current_mana: int = 1
+var turn_start_mana: int = 1  # the pool as it stood when this turn's PLAY opened (see MatchRules._refresh_mana)
 var pending_bonus_mana: int = 0  # temp bonus queued for next turn
 var active_temp_mana: int = 0  # temp bonus active this turn
 var is_deep: bool = false
@@ -44,7 +45,7 @@ func to_dict() -> Dictionary:
 		"base_max_mana": base_max_mana,
 		"bonus_max_mana": bonus_max_mana,
 		"current_mana": current_mana,
-		"pending_bonus_mana": pending_bonus_mana,
+		"turn_start_mana": turn_start_mana,
 		"active_temp_mana": active_temp_mana,
 		"is_deep": is_deep,
 		"permanently_leveled_up": level_up_out,
@@ -70,6 +71,7 @@ static func from_dict(d: Dictionary) -> PlayerState:
 	p.base_max_mana = int(d.get("base_max_mana", 1))
 	p.bonus_max_mana = int(d.get("bonus_max_mana", 0))
 	p.current_mana = int(d.get("current_mana", 1))
+	p.turn_start_mana = int(d.get("turn_start_mana", p.current_mana))
 	p.pending_bonus_mana = int(d.get("pending_bonus_mana", 0))
 	p.active_temp_mana = int(d.get("active_temp_mana", 0))
 	p.is_deep = bool(d.get("is_deep", false))

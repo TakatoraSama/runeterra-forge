@@ -166,7 +166,9 @@ func test_summon_places_a_resolved_card_at_the_end() -> void:
 
 	var events := _of_type(MatchEvents.CARD_SUMMONED)
 	assert_eq(events.size(), 1)
-	assert_eq(events[0], MatchEvents.card_summoned(0, id, "Chip", 1, 0))
+	assert_eq(events[0], MatchEvents.card_summoned(0, id, "Chip", 1, 0,
+		state.card(id).get_current_power(), state.card(id).get_current_cost(), state.card(id).keywords()),
+		"and the event carries the card's final numbers, so a viewer never has to guess them")
 
 
 func test_summon_appends_to_a_used_zone() -> void:

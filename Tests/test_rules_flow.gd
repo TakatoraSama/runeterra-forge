@@ -269,10 +269,11 @@ func test_temp_mana_applies_for_exactly_one_turn() -> void:
 	assert_eq(rules.state.players[0].current_mana, 3)
 
 
-func test_end_turn_of_one_player_resolves_nothing() -> void:
+func test_end_turn_of_one_player_announces_only_that_turn_end() -> void:
 	var rules := _started(_deck(20), _deck(20))
 	var events := rules.submit(0, MatchIntents.end_turn())
-	assert_eq(events, [], "ending early is accepted silently")
+	assert_eq(_types_of(events), [MatchEvents.TURN_ENDED], "ending early is accepted, and says so")
+	assert_eq(events[0]["player"], 0, "turn_ended is public and names who ended")
 	assert_eq(rules.state.round_phase, MatchState.RoundPhase.PLAY, "the round keeps going")
 	assert_true(rules.state.players[0].ended_turn)
 	assert_false(rules.state.players[1].ended_turn)

@@ -580,8 +580,14 @@ func test_end_turn_rejected_when_the_player_already_ended() -> void:
 
 func test_end_turn_is_accepted_and_closes_the_round() -> void:
 	var rules := _rich_rules()
-	assert_eq(rules.submit(0, MatchIntents.end_turn()), [], "the first end turn is silent")
-	assert_true(rules.submit(1, MatchIntents.end_turn()).size() > 0, "the second one resolves the round")
+	var first := rules.submit(0, MatchIntents.end_turn())
+	assert_eq(first.size(), 1, "the first end turn only announces itself")
+	assert_eq(first[0]["type"], MatchEvents.TURN_ENDED)
+	assert_eq(first[0]["player"], 0)
+	var second := rules.submit(1, MatchIntents.end_turn())
+	assert_eq(second[0]["type"], MatchEvents.TURN_ENDED, "the second one announces itself too, first")
+	assert_eq(second[0]["player"], 1)
+	assert_true(second.size() > 1, "and then resolves the round")
 	assert_eq(rules.state.turn, 2, "and opens the next turn")
 	assert_eq(rules.state.round_phase, MatchState.RoundPhase.PLAY, "which is in PLAY again")
 
