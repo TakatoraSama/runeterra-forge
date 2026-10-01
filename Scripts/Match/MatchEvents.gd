@@ -209,9 +209,16 @@ static func card_summoned(player: int, instance_id: int, card_id: String, col: i
 	}
 
 
-static func card_leveled_up(instance_id: int, old_card_id: String, new_card_id: String) -> Dictionary:
-	"""A champion card swapped its card_id when levelling up."""
-	return {"type": CARD_LEVELED_UP, "instance_id": instance_id, "old_card_id": old_card_id, "new_card_id": new_card_id}
+static func card_leveled_up(instance_id: int, old_card_id: String, new_card_id: String, silent: bool = false) -> Dictionary:
+	"""A champion card swapped its card_id when levelling up. `silent` marks the
+	secondary copies that only followed the champion's level-up."""
+	return {
+		"type": CARD_LEVELED_UP,
+		"instance_id": instance_id,
+		"old_card_id": old_card_id,
+		"new_card_id": new_card_id,
+		"silent": silent,
+	}
 
 
 static func deep_changed(player: int, is_deep: bool) -> Dictionary:
@@ -254,8 +261,12 @@ static func resolve_started(plays: Array) -> Dictionary:
 static func redact_for(event: Dictionary, viewer: int) -> Variant:
 	"""Return what `viewer` is allowed to see of `event`, or null if nothing is sent.
 	`event` is never mutated: the result is always a deep copy.
-	Opponent plays stay secret until RESOLVE, and hidden hand contents keep their
-	identity but lose `card_id`."""
+	An event tagged "private_to" (a card that is still in a hand or a deck) goes
+	to its owner alone; everything else follows the opponent-visibility rules,
+	where opponent plays stay secret until RESOLVE and hidden hand contents keep
+	their identity but lose `card_id`."""
+	if event.has("private_to") and int(event["private_to"]) != viewer:
+		return null
 	var copy: Dictionary = event.duplicate(true)
 	var owner_id: Variant = copy.get("player", null)
 	var is_opponent: bool = not (owner_id is int and owner_id == viewer)

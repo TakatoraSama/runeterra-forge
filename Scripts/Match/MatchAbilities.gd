@@ -2,6 +2,10 @@
 ##
 ## The base class is a complete no-op: M2 has the round loop but no card abilities,
 ## so every hook simply does nothing (the `on_round_*` hooks report "nothing fired").
+##   on_discard       — after ops.discard() took a card out of a hand
+##   on_last_breath   — after a real ops.kill(); the card is already GONE
+##   on_level_up      — after ops.level_up() changed the primary card
+##   on_deep          — after ops.set_deep() flipped is_deep
 ## M3 subclasses this, binds it with bind() and implements the cards themselves.
 ##
 ## Rules/Ops call the hooks at exactly these moments:
@@ -65,4 +69,35 @@ func on_game_end_phase() -> void:
 
 func after_change() -> void:
 	"""Called after each resolved card / ability batch (M3: auras, level-ups)."""
+	pass
+
+
+func on_discard(id: int) -> void:
+	"""Card `id` just left a hand through ops.discard(); it is GONE already."""
+	pass
+
+
+func on_last_breath(id: int) -> void:
+	"""Card `id` was really killed by ops.kill(); the card is GONE already."""
+	pass
+
+
+func on_level_up(id: int) -> void:
+	"""Card `id` just levelled up through ops.level_up() (primary card only;
+	silent copies of the same champion do NOT fire this)."""
+	pass
+
+
+func on_deep(player: int) -> void:
+	"""`player` just went Deep (their deck ran out) through ops.set_deep()."""
+	pass
+
+
+func prevents_death(id: int) -> bool:
+	"""Returns true when card `id` survives the kill that is about to happen."""
+	return false
+
+
+func on_death_prevented(id: int) -> void:
+	"""Card `id` was about to die but an ability saved it (still on board)."""
 	pass

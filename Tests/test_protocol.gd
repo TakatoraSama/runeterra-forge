@@ -226,6 +226,47 @@ func test_redact_does_not_mutate_input() -> void:
 	assert_eq(drawn, snapshot, "result is a copy, not the input")
 
 
+func test_redact_hides_a_private_event_from_the_other_player() -> void:
+	# A card that is still in a hand or a deck is nobody else's business, whatever
+	# its event type is.
+	for event: Dictionary in [
+		{"type": MatchEvents.COST_CHANGED, "instance_id": 5, "delta": -1, "new_cost": 3, "private_to": 1},
+		{"type": MatchEvents.POWER_CHANGED, "instance_id": 5, "delta": 2, "new_power": 4, "private_to": 1},
+		{"type": MatchEvents.KEYWORD_ADDED, "instance_id": 5, "keyword": "Stun", "private_to": 1},
+		{"type": MatchEvents.KEYWORD_REMOVED, "instance_id": 5, "keyword": "Stun", "private_to": 1},
+		{"type": MatchEvents.CARD_LEVELED_UP, "instance_id": 5, "old_card_id": "Azir1",
+			"new_card_id": "Azir2", "silent": true, "private_to": 1},
+	]:
+		assert_eq(MatchEvents.redact_for(event, 0), null, "player 0 must not receive %s" % event["type"])
+		assert_eq(MatchEvents.redact_for(event, 1), event, "the owner receives it unchanged")
+
+
+func test_redact_private_beats_the_other_rules() -> void:
+	# private_to is checked first: an event that the visibility rules would happily
+	# forward is still dropped for everyone but its owner.
+	var drawn := MatchEvents.card_drawn(1, 5, "Azir1")
+	drawn["private_to"] = 1
+	assert_eq(MatchEvents.redact_for(drawn, 0), null, "the opponent gets nothing at all")
+	assert_eq(MatchEvents.redact_for(drawn, 1), drawn, "the owner gets the whole thing")
+
+
+func test_redact_private_player_survives_a_json_round_trip() -> void:
+	# The viewer id arrives as a float over the wire, so the check has to be numeric.
+	var event := MatchEvents.card_leveled_up(5, "Azir1", "Azir2", true)
+	event["private_to"] = 1
+	var restored: Dictionary = JSON.parse_string(JSON.stringify(event))
+	assert_eq(MatchEvents.redact_for(restored, 0), null, "0.0 != 0 in the eyes of the check")
+	assert_true(MatchEvents.redact_for(restored, 1) is Dictionary, "1.0 == 1")
+	assert_eq(MatchEvents.redact_for(restored, 1)["new_card_id"], "Azir2", "the payload is intact")
+
+
+func test_card_leveled_up_carries_the_silent_flag() -> void:
+	var loud := MatchEvents.card_leveled_up(8, "Azir1", "Azir2")
+	assert_false(loud["silent"], "the primary card's level-up is loud")
+	var quiet := MatchEvents.card_leveled_up(9, "Azir1", "Azir2", true)
+	assert_true(quiet["silent"], "the copies that follow silently")
+
+
 # --- MatchIntents.is_well_formed: the happy paths ---
 
 func test_intents_constructors() -> void:
