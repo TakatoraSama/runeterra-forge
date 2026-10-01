@@ -20,8 +20,8 @@ const LANE_EFFECT := &"lane_effect"				# {col, lane_id, effect: String}
 const CARD_DRAWN := &"card_drawn"					# {player, instance_id, card_id}
 const CARD_CREATED_IN_HAND := &"card_created_in_hand"	# {player, instance_id, card_id, creator_instance_id}
 const CARD_PLAYED := &"card_played"				# {player, instance_id, card_id, col, slot}
-const PLAY_UNDONE := &"play_undone"				# {player, instance_ids: Array}
-const INTENT_REJECTED := &"intent_rejected"		# {player, intent_type, reason}
+const PLAY_UNDONE := &"play_undone"				# {player, instance_ids: Array, hand_after: Array of instance ids}
+const INTENT_REJECTED := &"intent_rejected"		# {player, intent_type, reason, instance_id (-1 = the intent names no card)}
 const SWAP_STARTED := &"swap_started"				# {player, instance_id, from_col, to_col}
 const CARD_SWAPPED := &"card_swapped"				# {player, instance_id, from_col, to_col, slot}
 const CARD_REVEALED := &"card_revealed"			# {player, instance_id, card_id, col, slot}
@@ -107,14 +107,24 @@ static func card_played(player: int, instance_id: int, card_id: String, col: int
 	}
 
 
-static func play_undone(player: int, instance_ids: Array) -> Dictionary:
-	"""`player` undid the listed plays, pulling them back to hand."""
-	return {"type": PLAY_UNDONE, "player": player, "instance_ids": instance_ids}
+static func play_undone(player: int, instance_ids: Array, hand_after: Array = []) -> Dictionary:
+	"""`player` undid the listed plays, pulling them back to hand. `hand_after` is that
+	player's hand order once every card is back, so a presenter can re-lay the hand
+	without guessing which slot each card returned to."""
+	return {"type": PLAY_UNDONE, "player": player, "instance_ids": instance_ids, "hand_after": hand_after}
 
 
-static func intent_rejected(player: int, intent_type: String, reason: String) -> Dictionary:
-	"""An intent from `player` was refused because of `reason`."""
-	return {"type": INTENT_REJECTED, "player": player, "intent_type": intent_type, "reason": reason}
+static func intent_rejected(player: int, intent_type: String, reason: String, instance_id: int = -1) -> Dictionary:
+	"""An intent from `player` was refused because of `reason`. `instance_id` is the card
+	the intent was about, or -1 for intents that name none (end_turn, undo), so a
+	presenter can send that card home instead of only showing the reason."""
+	return {
+		"type": INTENT_REJECTED,
+		"player": player,
+		"intent_type": intent_type,
+		"reason": reason,
+		"instance_id": instance_id,
+	}
 
 
 static func swap_started(player: int, instance_id: int, from_col: int, to_col: int) -> Dictionary:

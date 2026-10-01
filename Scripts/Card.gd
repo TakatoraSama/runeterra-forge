@@ -324,6 +324,41 @@ func _perform_level_up(new_card_id: String) -> void:
 			await get_tree().create_timer(0.05).timeout
 		_card_manager._level_up_in_progress = true
 
+	await play_level_up_animation(new_card_id)
+
+	# ── 7. Release global level-up lock and decrement pending count ──────
+	if _card_manager:
+		_card_manager._level_up_in_progress = false
+		_card_manager._level_up_pending -= 1
+	_display_card_id = ""  # clear: card_id is now the final value, no override needed
+
+	var new_name = new_data.get("Name", new_card_id)
+	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
+		old_name, old_name, old_id, new_name, new_card_id])
+
+	# ── 8. Upgrade all remaining copies (hand, deck, other board cards) ──────────
+	# Only for locally-owned cards; opponent copies are synced via RPC inside
+	# upgrade_all_copies. This fires AFTER the animation so the opponent sees the
+	# primary animation complete before receiving the global upgrade notice.
+	if is_local_card and _card_manager:
+		_card_manager.upgrade_all_copies(old_id, new_card_id)
+
+	# ── 9. Fire "When I level up" ability ────────────────────────────────
+	AbilityResolver.execute_level_up_ability(self)
+
+
+func play_level_up_animation(new_card_id: String) -> void:
+	"""View-only level-up sequence: fly to centre → spin (repopulated mid-spin)
+	→ fly back to the current slot → settle.
+	Used directly by the presenter in engine mode (the Match engine owns the
+	upgrade itself), and by _perform_level_up() inside the global level-up lock.
+	Callers set card_id to new_card_id before playing; power/cost modifiers and
+	the card's slot are preserved."""
+	var new_data = CardDatabase.CARDS.get(new_card_id)
+	if not new_data:
+		print("play_level_up_animation: unknown card id ", new_card_id)
+		return
+
 	# Animation is starting — advance display to show this level's stats now
 	_display_card_id = new_card_id
 	# Hide the stun symbol so it doesn't float over the card back mid-spin
@@ -378,25 +413,7 @@ func _perform_level_up(new_card_id: String) -> void:
 	# ── 6. Brief settle pause (0.5 sec) ──────────────────────────────────
 	await get_tree().create_timer(0.5).timeout
 
-	# ── 7. Release global level-up lock and decrement pending count ──────
-	if _card_manager:
-		_card_manager._level_up_in_progress = false
-		_card_manager._level_up_pending -= 1
 	_display_card_id = ""  # clear: card_id is now the final value, no override needed
-
-	var new_name = new_data.get("Name", new_card_id)
-	print("%s leveled up! %s (ID %s) -> %s (ID %s)" % [
-		old_name, old_name, old_id, new_name, new_card_id])
-
-	# ── 8. Upgrade all remaining copies (hand, deck, other board cards) ──────────
-	# Only for locally-owned cards; opponent copies are synced via RPC inside
-	# upgrade_all_copies. This fires AFTER the animation so the opponent sees the
-	# primary animation complete before receiving the global upgrade notice.
-	if is_local_card and _card_manager:
-		_card_manager.upgrade_all_copies(old_id, new_card_id)
-
-	# ── 9. Fire "When I level up" ability ────────────────────────────────
-	AbilityResolver.execute_level_up_ability(self)
 
 
 # ── Runtime keyword management ─────────────────────────────────────────────

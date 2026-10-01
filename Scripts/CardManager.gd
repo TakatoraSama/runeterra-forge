@@ -42,6 +42,86 @@ var _swap_drag_origin_zone: Vector2i = Vector2i(-1, -1)  # The zone the Elusive 
 var _pending_opponent_swaps: Array = []  # Deferred opponent swap data [{card_id, from_col, to_col}] — applied at SWAP_LANE phase
 
 
+# ── Engine mode (offline vs bot on the Match engine) ─────────────────────────
+# Every branch below is inert unless a MatchController has started; online/LAN
+# and `--engine=old` keep running the code above untouched. In engine mode this
+# script only turns input into intents and reads engine state for the checks the
+# engine still wants done client-side (see CONTRACT-M4 §C).
+
+const TOAST_FADE_TIME := 1.5
+const TOAST_FONT_SIZE := 26
+const TOAST_COLOR := Color(1.0, 0.85, 0.3, 1.0)
+
+
+## The MatchController node when the game runs on the Match engine, else null.
+func _match_controller() -> Node:
+	if MatchController.active():
+		return get_node_or_null("/root/Main/MatchController")
+	return null
+
+
+## The MatchPresenter node (view only) when the game runs on the Match engine.
+func _match_presenter() -> Node:
+	if _match_controller():
+		return get_node_or_null("/root/Main/MatchPresenter")
+	return null
+
+
+## The engine's CardState for a card node, or null when the card is not one the
+## presenter tracks (preview cards, or no controller at all).
+func _engine_card_state(card) -> Variant:
+	var controller := _match_controller()
+	var presenter := _match_presenter()
+	if not controller or not presenter:
+		return null
+	var instance_id: int = presenter.instance_of(card)
+	if instance_id < 0:
+		return null
+	return controller.state.card(instance_id)
+
+
+## Engine mode gate for swap-dragging a board card: the card must be ours,
+## resolved and Elusive, and must not have a swap queued yet. Stun is NOT checked
+## here — the engine rejects a stunned swap with reason "stunned", which the
+## presenter turns into a toast and a snap back.
+func _engine_can_start_swap_drag(card) -> bool:
+	var controller := _match_controller()
+	var state = _engine_card_state(card)
+	if state == null:
+		return false
+	if state.owner != int(controller.local_player):
+		return false
+	if not state.is_resolved:
+		return false
+	if not state.has_keyword("Elusive"):
+		return false
+	for entry in controller.state.pending_swaps:
+		if int(entry.get("instance_id", -1)) == state.instance_id:
+			return false
+	return true
+
+
+## Small centred message under the cards, fading out (engine mode only).
+func _show_toast(message: String) -> void:
+	var label := Label.new()
+	label.text = message
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", TOAST_FONT_SIZE)
+	label.add_theme_color_override("font_color", TOAST_COLOR)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	label.add_theme_constant_override("outline_size", 6)
+	label.size = Vector2(700, 40)
+	label.position = Vector2(610, 1010)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.z_index = 50
+	add_child(label)
+	var tween := create_tween()
+	tween.tween_interval(TOAST_FADE_TIME - 0.5)
+	tween.tween_property(label, "modulate:a", 0.0, 0.5)
+	await tween.finished
+	label.queue_free()
+
+
 # Lightweight proxy for opponent hand cards that don't exist as scene nodes on this client.
 # Exposes .card_id and .owner_player_id so behold consumers can treat it like a Card.
 class BeheldCardProxy extends RefCounted:
@@ -99,6 +179,12 @@ func _process(delta: float) -> void:
 		card_being_dragged.position = Vector2(clamp(mouse_pos.x, 0, screen_size.x), clamp(mouse_pos.y, 0, screen_size.y))
 			
 func start_drag(card):
+	# Engine mode: only the play phase and the swap gate are checked here — mana,
+	# stun and every other rule are the engine's to answer.
+	if _match_controller():
+		_start_drag_engine(card)
+		return
+
 	# Only allow dragging during PLAY phase
 	if game_manager_reference and game_manager_reference.has_method("is_play_phase"):
 		if not game_manager_reference.is_play_phase():
@@ -129,6 +215,25 @@ func start_drag(card):
 	card_being_dragged = card
 	card.scale = Vector2(DEFAULT_CARD_SCALE, DEFAULT_CARD_SCALE)
 	card.z_index = 10
+
+
+func _start_drag_engine(card) -> void:
+	"""Engine mode drag start. The board model belongs to the presenter, so the
+	origin slot is NOT freed here — only the drag bookkeeping is set up."""
+	var controller := _match_controller()
+	if not controller.is_play_phase():
+		return
+	if card.card_slot_is_in:
+		if not _engine_can_start_swap_drag(card):
+			return
+		_is_swap_drag = true
+		_swap_drag_origin_slot = card.card_slot_is_in
+		_swap_drag_origin_zone = board_reference.get_zone_for_slot(_swap_drag_origin_slot)
+	else:
+		_is_swap_drag = false
+	card_being_dragged = card
+	card.scale = Vector2(DEFAULT_CARD_SCALE, DEFAULT_CARD_SCALE)
+	card.z_index = 10
 	
 func _return_card_to_hand():
 	"""Reset card scale/z_index and return it to the player's hand."""
@@ -156,6 +261,10 @@ func _has_elusive_keyword(card) -> bool:
 func _finish_swap_drag() -> void:
 	"""Handle releasing a swap drag. Validates the destination and either registers
 	the swap (card moves to dest slot temporarily) or cancels (card snaps to origin)."""
+	if _match_controller():
+		_finish_swap_drag_engine()
+		return
+
 	_is_swap_drag = false
 	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	if dest_slot:
@@ -207,9 +316,38 @@ func _return_swap_card_to_origin() -> void:
 	_swap_drag_origin_zone = Vector2i(-1, -1)
 
 
+func _finish_swap_drag_engine() -> void:
+	"""Engine mode swap release. The card itself never moves here: a valid drop
+	becomes a swap_card intent (the engine keeps the card where it is until the
+	SWAP_LANE phase and the presenter animates it), an invalid one snaps back."""
+	_is_swap_drag = false
+	var controller := _match_controller()
+	var presenter := _match_presenter()
+	var instance_id: int = presenter.instance_of(card_being_dragged) if presenter else -1
+	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
+	var dest_zone: Vector2i = board_reference.get_zone_for_slot(dest_slot) if dest_slot else Vector2i(-1, -1)
+	# Valid destination: our own row, a different column, a lane (not the spell zone)
+	if instance_id >= 0 \
+			and dest_zone != Vector2i(-1, -1) \
+			and dest_zone.y == int(controller.local_player) \
+			and dest_zone.x != _swap_drag_origin_zone.x \
+			and dest_zone.x >= 0:
+		card_being_dragged = null
+		_swap_drag_origin_slot = null
+		_swap_drag_origin_zone = Vector2i(-1, -1)
+		controller.submit_local(MatchIntents.swap_card(instance_id, dest_zone.x))
+		return
+	# Invalid destination — return card to its origin slot
+	_return_swap_card_to_origin()
+
+
 func finish_drag():
 	if _is_swap_drag:
 		_finish_swap_drag()
+		return
+	# Engine mode: the drop becomes a play_card intent, the engine validates it.
+	if _match_controller():
+		_finish_drag_engine()
 		return
 	var card_slot_found = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	if card_slot_found:
@@ -309,6 +447,27 @@ func finish_drag():
 		_return_card_to_hand()
 
 
+func _finish_drag_engine() -> void:
+	"""Engine mode drop. The drop slot resolves to a board zone (col, row); only our
+	own row is playable, everything else goes back to the hand with a toast. The
+	engine decides the rest (mana, card type, lane, turn) and the presenter either
+	places the card or hands it back on intent_rejected."""
+	var controller := _match_controller()
+	var presenter := _match_presenter()
+	var card = card_being_dragged
+	var instance_id: int = presenter.instance_of(card) if presenter else -1
+	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
+	var zone_key: Vector2i = board_reference.get_zone_for_slot(dest_slot) if dest_slot else Vector2i(-1, -1)
+	if instance_id < 0 or zone_key == Vector2i(-1, -1) or zone_key.y != int(controller.local_player):
+		if zone_key != Vector2i(-1, -1) and zone_key.y != int(controller.local_player):
+			_show_toast("Play on your side")
+		_return_card_to_hand()
+		return
+	# Lane columns are 0..2, the spell zone is -1 (MatchState.SPELL_COL).
+	card_being_dragged = null
+	controller.submit_local(MatchIntents.play_card(instance_id, zone_key.x, -1))
+
+
 func resolve_played_cards() -> void:
 	# Spawn any pending opponent cards (hidden during PLAY, shown now as face-down)
 	_spawn_pending_opponent_cards()
@@ -403,6 +562,10 @@ func connect_card_signals(card):
 func _update_undo_button() -> void:
 	if not undo_button:
 		return
+	var controller := _match_controller()
+	if controller:
+		undo_button.disabled = not controller.can_undo()
+		return
 	var in_play_phase: bool = (
 		game_manager_reference != null and
 		game_manager_reference.game_phase == game_manager_reference.GamePhase.TURN_LOOP and
@@ -438,6 +601,14 @@ func _remove_undone_summoned_entry(card) -> void:
 
 
 func _on_undo_button_pressed() -> void:
+	# Engine mode: the engine owns the undo stack and refunds the mana itself;
+	# the presenter sends the cards back to the hand in the right order.
+	var controller := _match_controller()
+	if controller:
+		if not controller.can_undo():
+			return
+		controller.submit_local(MatchIntents.undo())
+		return
 	if undo_stack.is_empty():
 		return
 

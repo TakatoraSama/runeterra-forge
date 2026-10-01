@@ -62,6 +62,17 @@ func _build_player_deck() -> void:
 	print("Deck: using saved deck '%s' (%d cards)" % [active_name, player_deck.size()])
 
 
+## View-only deck count update (used by the presenter in engine mode, where the
+## engine owns the deck instead of player_deck). At 0 the whole stack is hidden.
+func set_view_count(n: int) -> void:
+	$RichTextLabel.text = str(n)
+	var hide := n <= 0
+	var collider := $Area2D/CollisionShape2D
+	collider.disabled = hide
+	$Sprite2D.visible = not hide
+	$RichTextLabel.visible = not hide
+
+
 # --- Shuffle ---
 func shuffle_deck() -> void:
 	player_deck.shuffle()

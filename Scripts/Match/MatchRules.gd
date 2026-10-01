@@ -171,16 +171,18 @@ func _run_round_hooks(is_round_start: bool) -> void:
 ## Every rejection emits intent_rejected and changes nothing.
 func submit(player: int, intent: Variant) -> Array:
 	var intent_type: String = ""
+	var intent_instance: int = -1
 	if intent is Dictionary:
 		intent_type = str(intent.get("type", ""))
+		intent_instance = _intent_instance_id(intent)
 	if player != 0 and player != 1:
-		_reject(player, intent_type, "bad_player")
+		_reject(player, intent_type, "bad_player", intent_instance)
 		return _flush()
 	if not MatchIntents.is_well_formed(intent):
-		_reject(player, intent_type, "malformed")
+		_reject(player, intent_type, "malformed", intent_instance)
 		return _flush()
 	if state.game_phase != MatchState.GamePhase.TURN_LOOP or state.round_phase != MatchState.RoundPhase.PLAY:
-		_reject(player, intent_type, "wrong_phase")
+		_reject(player, intent_type, "wrong_phase", intent_instance)
 		return _flush()
 	match intent_type:
 		MatchIntents.PLAY_CARD:
@@ -201,28 +203,28 @@ func _play_card(player: int, intent: Dictionary) -> void:
 	var id: int = int(intent["instance_id"])
 	var col: int = int(intent["col"])
 	if state.players[player].ended_turn:
-		_reject(player, type_name, "turn_ended")
+		_reject(player, type_name, "turn_ended", id)
 		return
 	var card := state.card(id)
 	if card == null or not state.players[player].hand.has(id):
-		_reject(player, type_name, "not_in_hand")
+		_reject(player, type_name, "not_in_hand", id)
 		return
 	var is_spell: bool = str(card.data().get("Type", "")) == "Spell"
 	if is_spell and col != MatchState.SPELL_COL:
-		_reject(player, type_name, "spell_needs_spell_zone")
+		_reject(player, type_name, "spell_needs_spell_zone", id)
 		return
 	if not is_spell and (col < 0 or col >= MatchState.COLUMNS):
-		_reject(player, type_name, "unit_needs_lane")
+		_reject(player, type_name, "unit_needs_lane", id)
 		return
 	if not is_spell and lanes.is_restricted(col):
-		_reject(player, type_name, "noxkraya")
+		_reject(player, type_name, "noxkraya", id)
 		return
 	if state.zone_cards(col, player).size() + _swap_reservations(player, col) >= _zone_capacity(col):
-		_reject(player, type_name, "zone_full")
+		_reject(player, type_name, "zone_full", id)
 		return
 	var cost: int = card.get_current_cost()
 	if cost > state.players[player].current_mana:
-		_reject(player, type_name, "not_enough_mana")
+		_reject(player, type_name, "not_enough_mana", id)
 		return
 
 	ops.spend_mana(player, cost)
@@ -287,7 +289,10 @@ func _undo(player: int) -> void:
 
 	ops.refund_mana(player, refund)
 	stack.clear()
-	_emit(MatchEvents.play_undone(player, undone))
+	var hand_after: Array = []
+	for id in state.players[player].hand:
+		hand_after.append(int(id))
+	_emit(MatchEvents.play_undone(player, undone, hand_after))
 
 
 ## swap_card {instance_id, to_col} — only an Elusive, resolved, unstunned card of the
@@ -297,32 +302,32 @@ func _swap_card(player: int, intent: Dictionary) -> void:
 	var id: int = int(intent["instance_id"])
 	var to_col: int = int(intent["to_col"])
 	if state.players[player].ended_turn:
-		_reject(player, type_name, "turn_ended")
+		_reject(player, type_name, "turn_ended", id)
 		return
 	var card := state.card(id)
 	if card == null or card.owner != player:
-		_reject(player, type_name, "not_your_card")
+		_reject(player, type_name, "not_your_card", id)
 		return
 	if card.location != CardState.Location.BOARD or card.col < 0 or card.col >= MatchState.COLUMNS:
-		_reject(player, type_name, "not_on_board")
+		_reject(player, type_name, "not_on_board", id)
 		return
 	if not card.is_resolved:
-		_reject(player, type_name, "not_resolved")
+		_reject(player, type_name, "not_resolved", id)
 		return
 	if not card.has_keyword("Elusive"):
-		_reject(player, type_name, "not_elusive")
+		_reject(player, type_name, "not_elusive", id)
 		return
 	if ops.is_stunned(id):
-		_reject(player, type_name, "stunned")
+		_reject(player, type_name, "stunned", id)
 		return
 	if _pending_swap_for(id) != null:
-		_reject(player, type_name, "already_swapping")
+		_reject(player, type_name, "already_swapping", id)
 		return
 	if to_col == card.col:
-		_reject(player, type_name, "same_column")
+		_reject(player, type_name, "same_column", id)
 		return
 	if state.zone_cards(to_col, player).size() + _swap_reservations(player, to_col) >= MatchState.SLOTS_PER_ZONE:
-		_reject(player, type_name, "zone_full")
+		_reject(player, type_name, "zone_full", id)
 		return
 	state.pending_swaps.append({
 		"instance_id": id,
@@ -519,9 +524,23 @@ func _end_game() -> void:
 # ----------------------------
 
 ## Emits one rejection. Only submit() flushes, so a rejection raised inside an intent
-## handler still reaches the caller of submit().
-func _reject(player: int, intent_type: String, reason: String) -> void:
-	_emit(MatchEvents.intent_rejected(player, intent_type, reason))
+## handler still reaches the caller of submit(). `instance_id` names the card the intent
+## was about, or -1 for intents that name none (end_turn, undo), so a presenter can put
+## that card back where it came from.
+func _reject(player: int, intent_type: String, reason: String, instance_id: int = -1) -> void:
+	_emit(MatchEvents.intent_rejected(player, intent_type, reason, instance_id))
+
+
+## The instance_id an intent names, or -1 when it names none or the value is not a
+## number. Read before is_well_formed(), so a half-formed play intent still reports
+## which card it was trying to move.
+func _intent_instance_id(intent: Dictionary) -> int:
+	var raw: Variant = intent.get("instance_id", null)
+	if raw is int:
+		return raw
+	if raw is float and is_finite(raw):
+		return int(raw)
+	return -1
 
 
 ## Switches the round phase and announces it (GameManager._set_round_phase).

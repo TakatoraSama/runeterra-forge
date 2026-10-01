@@ -81,6 +81,11 @@ func _initialize_player_states() -> void:
 
 
 func start_game() -> void:
+	# Engine mode: MatchController.start_offline() owns the match — never boot the
+	# old turn loop (it would fight the engine for mana, phases and the board).
+	if _match_controller():
+		return
+
 	# These autoload singletons outlive a single match — clear their per-match state.
 	StunManager.reset()
 	SwapLaneManager.reset()
@@ -175,7 +180,19 @@ func start_next_turn() -> void:
 
 
 func is_play_phase() -> bool:
+	# Engine mode (offline vs bot on the Match engine): the engine owns the phases.
+	var controller := _match_controller()
+	if controller:
+		return controller.is_play_phase()
 	return game_phase == GamePhase.TURN_LOOP and round_phase == RoundPhase.PLAY
+
+
+## The MatchController node when the game runs on the Match engine, else null.
+## Everything engine-specific in this script goes through it (see CONTRACT-M4).
+func _match_controller() -> Node:
+	if MatchController.active():
+		return get_node_or_null("/root/Main/MatchController")
+	return null
 
 
 func begin_round_start() -> void:
@@ -720,6 +737,11 @@ func _emit_mana(player_id: int) -> void:
 # ----------------------------
 
 func _on_end_turn_button_pressed() -> void:
+	# Engine mode: the intent is the only thing we send, the Match engine decides.
+	var controller := _match_controller()
+	if controller:
+		controller.submit_local(MatchIntents.end_turn())
+		return
 	end_play_phase()
 
 

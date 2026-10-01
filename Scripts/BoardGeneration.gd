@@ -81,10 +81,11 @@ func pick_random_lane_ids() -> Array:
 	return result
 
 
-func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
+func create_lane_views(ordered_lane_ids: Array) -> void:
 	"""Create and populate 3 lane scenes using the given lane ID list (index = column).
 	Left lane (col 0) is fully revealed immediately.
-	Mid (col 1) and right (col 2) are hidden until turns 2 and 3 respectively."""
+	Mid (col 1) and right (col 2) are hidden until turns 2 and 3 respectively.
+	View-only: no LaneManager, no gameplay wiring."""
 	if not lane_scene:
 		return
 
@@ -118,6 +119,15 @@ func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
 			var reveal_turn := col + 1  # col 1 → turn 2, col 2 → turn 3
 			_apply_lane_visuals_hidden(lane_instance, reveal_turn)
 
+
+func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
+	"""Same as create_lane_views(), plus wiring LaneManager so it can track
+	reveals and lane effects (old-engine path)."""
+	if not lane_scene:
+		return
+
+	create_lane_views(ordered_lane_ids)
+
 	# Inform LaneManager of the lane assignment so it can track reveals and effects
 	LaneManager.setup_lanes(ordered_lane_ids)
 
@@ -149,14 +159,19 @@ func _apply_lane_visuals_hidden(lane_instance: Node, reveal_turn: int) -> void:
 		lane_sprite_node.texture = null
 
 
-func reveal_lane_visuals(col: int) -> void:
-	"""Called by LaneManager when a hidden lane becomes revealed.
+func reveal_lane_view(col: int) -> void:
+	"""Called by the presenter when the engine reveals a lane.
 	Applies full name, sprite, and description to the lane scene."""
 	var lane_instance = lane_nodes_by_col.get(col)
 	var lane_data: Dictionary = lane_data_by_col.get(col, {})
 	if lane_instance and is_instance_valid(lane_instance):
 		_apply_lane_visuals(lane_instance, lane_data)
 		lane_instance.set_meta("lane_reveal_turn", -1)
+
+
+func reveal_lane_visuals(col: int) -> void:
+	"""Called by LaneManager when a hidden lane becomes revealed."""
+	reveal_lane_view(col)
 
 
 func _apply_lane_visuals(lane_instance: Node, lane_data: Dictionary) -> void:

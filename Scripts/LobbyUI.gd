@@ -61,12 +61,53 @@ func _on_join_pressed() -> void:
 
 
 func _on_offline_pressed() -> void:
+	# Engine mode (default): the Match engine + presenter own the match. `--engine=old`
+	# (and everything online) keeps the BotManager + GameManager turn loop below.
+	if not _dev_engine_old:
+		_start_engine_offline()
+		return
 	if not network_manager:
 		return
 	network_manager.start_offline()
 	BotManager.bot_enabled = true
 	status_label.text = "Starting offline..."
 	_start_game()
+
+
+func _start_engine_offline() -> void:
+	"""Create the MatchController + MatchPresenter under /root/Main and hand the match
+	to the engine. Nothing else here touches the board: the presenter builds the view."""
+	var main := get_node_or_null("/root/Main")
+	if not main:
+		status_label.text = "Cannot start offline: /root/Main is missing"
+		return
+	var controller := MatchController.new()
+	controller.name = "MatchController"
+	var presenter := MatchPresenter.new()
+	presenter.name = "MatchPresenter"
+	main.add_child(controller)
+	main.add_child(presenter)
+
+	panel.visible = false
+	if _dev_quit_on_end and presenter.has_signal("idle"):
+		presenter.idle.connect(_on_dev_presenter_idle.bind(controller))
+
+	# Decks: the same selection Deck._build_player_deck() makes (a complete saved
+	# deck, else the default deck) and the offline bot's deck.
+	controller.start_offline(MatchController.human_deck_ids(), MatchController.bot_deck_ids(), _dev_seed)
+
+
+func _on_dev_presenter_idle(controller: Node) -> void:
+	"""Engine mode has no GameManager.phase_changed: `--quit-on-end` watches the
+	presenter instead, and quits once the engine's state says the match is over."""
+	if _dev_quit_done or not _dev_quit_on_end:
+		return
+	var state: MatchState = controller.get("state")
+	if state == null or state.game_phase != MatchState.GamePhase.GAME_END:
+		return
+	_dev_quit_done = true
+	await get_tree().create_timer(3.0).timeout   # same grace as the old path
+	get_tree().quit()
 
 
 func _on_player_connected(_peer_id: int) -> void:
@@ -99,6 +140,10 @@ const DEV_JOIN_MAX_ATTEMPTS := 15
 
 var _dev_autojoin_ip: String = ""
 var _dev_autoendturn: bool = false
+var _dev_offline: bool = false
+var _dev_engine_old: bool = false
+var _dev_seed: int = -1
+var _dev_quit_done: bool = false
 var _dev_quit_on_end: bool = false
 var _dev_join_attempts: int = 0
 
@@ -119,6 +164,12 @@ func _parse_dev_args() -> void:
 			_dev_autoendturn = true
 		elif arg == "--quit-on-end":
 			_dev_quit_on_end = true
+		elif arg == "--offline":
+			_dev_offline = true
+		elif arg.begins_with("--engine="):
+			_dev_engine_old = arg.substr("--engine=".length()) == "old"
+		elif arg.begins_with("--seed="):
+			_dev_seed = int(arg.substr("--seed=".length()))
 
 	if autojoin:
 		multiplayer.connection_failed.connect(_on_dev_join_failed)
@@ -126,6 +177,8 @@ func _parse_dev_args() -> void:
 		var game_manager = get_node("/root/Main/GameManager")
 		if game_manager:
 			game_manager.phase_changed.connect(_on_dev_phase_changed)
+	if _dev_offline:
+		call_deferred("_on_offline_pressed")
 
 
 func _on_dev_join_failed() -> void:
