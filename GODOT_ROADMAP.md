@@ -18,7 +18,7 @@ Where the card text and the code disagree, **the code is the source of truth**.
 | **0. Upgrade to Godot 4.7** | ✅ **Done**: Godot 4.7.2, commit `63570fe` on `upgrade/godot-4.7`. No regressions vs the 4.6 baseline. Manual GUI smoke test + Windows export still pending | Engine migration (§0) | Low risk. All later work (particles, shaders, new scenes) is built on the target version | S |
 | **1. Critical fixes (cheap ones only)** | ✅ **Done**: commit `088f423` (branch `fix/phase-1-critical`, merged into `upgrade/godot-4.7`). `tools/lan_selftest.sh` passes (and fails with the old seed formula). Manual GUI check (F9 Stun, spell badge) + a LAN match with real plays still pending | Seed fix, cosmetic RNG split, per-match reset of singletons, keyword badge path bug (§1.1 a+d, §1.6), plus a found bug: `CardSpell.tscn` had no script attached. Adds debug-only auto-connect flags (`--autohost`, `--autojoin=<ip>`, `--autoendturn`, `--quit-on-end`), `[SYNC]` log lines, and `tools/lan_selftest.sh` to test LAN sync unattended | Correctness first. The other desync fixes (§1.1 b, c, e) are **superseded by Phase 3**, so don't hand-write mirror RPCs | S |
 | **2. Quick wins** | ✅ **Done**: branch `phase2/integration` (merged into `upgrade/godot-4.7`). Offline smoke x3 + `tools/lan_selftest.sh` x2 pass. Manual GUI check (Deck Builder save/restart/load, Xerath2/Janna2/Rumble2 in a match, undo, recall+Stun, MiniCard sizing) + a LAN match with real plays still pending | Saved decks used in matches, text/code mismatches, undo tracker, MiniCard SubViewport warning (§1.2, §1.5, §1.6). **Planned and shipped:** saved decks reach a match (§1.2); §1.5 fixed against the card text — **Xerath2 back-row only**, **Janna2 passive applies to every draw including bot draws**, **Rumble2 grants the Augment badge**, plus the Ice Pillar mana ramp; undo drops stale `summoned_cards`; recall clears Stun; the MiniCard SubViewport warning is gone. **Extras found while in there:** the active deck is persisted in `user://active_deck.json`; Deck Builder *load* sets the active deck; only full 12-card decks are used in a match (otherwise the default deck); undo restores hand glow; the Augment sprite path is fixed | Small, visible improvements for players | S |
-| **3. Multiplayer rework: host runs the rules** | Planned | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
+| **3. Multiplayer rework: host runs the rules** | 🔄 In progress. **M1 Foundation ✅ implemented** (branch `phase3/m1-foundation`): `Scripts/Match/` state + protocol + `MatchRules` skeleton + `MatchSetup`, headless test runner (`tools/run_tests.sh`, 79 tests), deterministic checksums across processes. Next: M2 Rules core. Approach: new pure-data engine in `Scripts/Match/` built **in parallel** with the old code, then switched over (see §3.9) | Split game state from nodes, rules engine emitting events, presenter, intents + filtered events over ENet, LAN discovery (Part 3) | Removes desyncs by design and hides hidden information. It must come **before** the event VFX and cinematics, because those hook onto its event stream | L |
 | **4. VFX foundation + status effects** | Planned (Stun ✅ shipped) | Generalise the Stun pattern. Elusive float, Deep glow (§2.1, §2.2) | Reuses shipped code. Status effects read card state, so they can start during Phase 3 | M |
 | **5. Event effects** | Planned | Play/flip, kill, discard, recall, create, summon, swap, lane reveal, Sun Disc (§2.3), each as a handler for one event type | One presenter handler per event (Phase 3) | M |
 | **6. Cinematics** | Planned | Trundle ice pillar, level-up cinematic (§2.4) | Biggest visual effort. Needs Phases 3–5 | L |
@@ -432,25 +432,28 @@ The host calls its own `MatchRules` and presenter directly; there's no loopback 
 - Log every event batch to `user://logs/match_<time>.jsonl`.
 - A debug replay mode feeds a log to the presenter.
 
-### 3.9 Migration steps (each step leaves the game playable)
+### 3.9 Migration steps (revised for Phase 3 kickoff)
 
-| Step | Work | Done when |
-|---|---|---|
-| **M1. IDs** | Give every card an `instance_id`, and store owners as absolute player IDs (keep the view mapping) | Offline and LAN play unchanged |
-| **M2. Extract state** | Create `CardState` / `PlayerState` / `MatchState`. `Card.gd` reads and writes through its `CardState`. Trackers, stun, swaps and mana move into `MatchState` | Offline play unchanged, with logic still in the old systems |
-| **M3. Rules engine (offline first)** | Port the systems into `MatchRules`, emitting events, in this order: turn/mana loop → play/undo/resolve → Play abilities → Round/Game End → level-ups → auras → lanes → swap/stun. Build `MatchPresenter`. The bot submits intents | A full offline match vs the bot runs through `MatchRules` + presenter, and the old ability code path is unused |
-| **M4. Online** | Add `MatchNet`: intents in, filtered events out, snapshot at match start, `PresentationDone` gating. Delete the old RPCs and lockstep code (§3.10) | LAN match with no desyncs, no hidden-info leaks, and rejected illegal intents |
-| **M5. LAN discovery** | Beacon + lobby host list + version check | Joining without typing an IP |
-| **M6. Polish (optional)** | Reconnect, event logs + replay, a "waiting for opponent" indicator | – |
+**Decisions (Phase 3 kickoff):**
+- **Parallel engine + switch.** The new engine is built in `Scripts/Match/` *next to* the old code, which keeps working until the switch. Offline moves first (M4), then online (M5); the old engine and its RPCs are deleted in M5.
+- **Opponent plays stay hidden until RESOLVE** (current behaviour): the host sends nothing about them before then.
+- **Process:** one worktree + branch per milestone (`phase3/mN-…`), started from `upgrade/godot-4.7`. Claude commits after review; the user checks and pushes, then the branch is fast-forwarded into `upgrade/godot-4.7`.
+- **Tests:** a small built-in headless runner (`tools/run_tests.sh` → `Tests/run_all.gd`), no addon. Scenario tests drive `MatchRules` directly.
 
-**Tests:** add GdUnit4 or GUT and run them headless (`godot --headless`). Because `MatchRules` is pure data, write scenario tests: set up a board, submit intents, and assert the state and events. Useful first ones:
-- Rumble's discard brackets;
-- Nasus vs Tryndamere death prevention;
-- the Azir aura pushing Renekton to his level-up;
-- the three Game End passes;
-- Sion's lane choice from hand.
+**Engine rules** (all milestones, checked in review): files in `Scripts/Match/` extend `RefCounted` only; no `Node`, `get_node`, `await`, autoload identifiers or scene-tree access; no global `randi()`/`randf()` (all randomness via `MatchState.rng`); **player IDs are absolute** (0 = host, 1 = guest), perspective exists only in the view; card data comes from `CardDatabase.CARDS` / `LaneDatabase.LANES`.
 
-### 3.10 Deleted after M4
+| M | Name | Content | Game behaviour changes? | User check |
+|---|---|---|---|---|
+| **M1** | Foundation | State classes (`CardState`, `PlayerState`, `MatchState`), events/intents protocol, `MatchRules` skeleton, `MatchSetup`, headless test runner | No (new code only) | Test output |
+| **M2** | Rules core (no card abilities) | Setup + shuffle, Game Start hook, turn/mana loop (incl. temporary bonus), draw/Deep, play/undo/swap intents with every `finish_drag` rule, resolve order (flip-first), reveal, round end, priority, lane assignment/reveal + the 5 lane effects, game end winner; bot decision → intents | No | Test output |
+| **M3** | Abilities | Port all `AbilityResolver` handlers, kill/summon flows, death prevention, Last Breath, behold, trackers, `LevelUpManager` (incl. global upgrade + Sun Disc), `AuraSystem`, Stun, swap-arrive. Scenario tests per ability | No | Test output |
+| **M4** | Presenter + offline switch | `MatchPresenter` plays events through the existing card views and animations; input → intents; the bot runs on the engine; offline uses the new engine (`--engine=new`, then by default) | **Yes (offline)** | GUI play vs bot |
+| **M5** | Online | `MatchNet` (4 RPCs), per-recipient filtering, start snapshot, `presentation_done` gating; `lan_selftest` gains auto-play with real plays; **delete the old engine + old RPCs** (§3.10) | **Yes (online)** | LAN match |
+| **M6** | LAN polish | UDP host discovery + version handshake; optional reconnect + event logs | Yes (lobby) | Lobby check |
+
+Useful first scenario tests (M3): Rumble's discard brackets; Nasus vs Tryndamere death prevention; the Azir aura pushing Renekton to his level-up; the three Game End passes; Sion's lane choice from hand.
+
+### 3.10 Deleted in M5
 
 - `seed(...)` calls in `GameManager`, and the `_local_rng` vs global split in `AbilityResolver`.
 - Resolve lockstep: `_receive_card_resolve_done`, `_wait_for_opponent_card_resolve`, `_card_resolve_done_signals`.
