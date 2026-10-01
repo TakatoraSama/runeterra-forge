@@ -220,9 +220,13 @@ func submit_local(intent: Dictionary) -> bool:
 		return true
 	if host == null:
 		return false
+	# The turn is read BEFORE the submit: a refusal leaves the engine where it was, but
+	# reading it after would tie the log to whenever the batch finished being routed.
+	var turn := state.turn if state != null else -1
 	var accepted: bool = host.submit(local_player, intent)
 	_sync_engine_refs()
-	_log_play(intent)
+	if accepted:
+		_log_play(local_player, turn, intent)
 	_arm_ack_timeout()
 	if mode == Mode.OFFLINE:
 		_run_bot()
@@ -427,9 +431,13 @@ func start_guest(p_net: Node) -> void:
 func on_remote_intent(intent: Dictionary) -> void:
 	if mode != Mode.HOST or host == null:
 		return
-	host.submit(1, intent)
+	# The guest is ALWAYS absolute 1 here — it is the only peer that can send an intent
+	# to a host, and its id comes from the transport, not from the payload.
+	var turn := state.turn if state != null else -1
+	var accepted: bool = host.submit(1, intent)
 	_sync_engine_refs()
-	_log_play(intent)
+	if accepted:
+		_log_play(1, turn, intent)
 	_arm_ack_timeout()
 
 
@@ -686,19 +694,25 @@ func _run_ack_timeout(turn: int) -> void:
 # Session logging and leak checking
 # ----------------------------
 
-## One [PLAY] line per accepted play, on the peer that owns the engine. This is the
+## One [PLAY] line per ACCEPTED play, on the peer that owns the engine. This is the
 ## host's record that a real play actually happened for each player — lan_selftest
 ## requires at least one per player, and a session where a peer only ever ends its turn
-## would otherwise look like a healthy match. Printed for the host's own autoplay and
-## for the guest's intents alike, because from the engine's side there is no difference
-## between them.
-func _log_play(intent: Dictionary) -> void:
+## would otherwise look like a healthy match.
+##
+## `player` is passed in rather than read from `local_player`, which is the HOST's own
+## id (always 0 here) and so could only ever print player=0. `turn` is the turn the
+## intent was submitted IN, captured by the caller before host.submit() ran.
+##
+## Only ever called for an intent MatchHost ACCEPTED, which is the second half of the
+## point: the guest submits into a turn the host has not opened yet and is refused with
+## not_ready several times a match, and a [PLAY] line for a refused intent would claim
+## a card reached the board when it never left a hand.
+func _log_play(player: int, turn: int, intent: Dictionary) -> void:
 	if mode != Mode.HOST:
 		return
 	if str(intent.get("type", "")) != str(MatchIntents.PLAY_CARD):
 		return
-	var turn := state.turn if state != null else -1
-	print("[PLAY] player=%d turn=%d" % [local_player, turn])
+	print("[PLAY] player=%d turn=%d" % [player, turn])
 
 
 ## The guest's snapshot refresh is MatchHost's job, not this file's: a viewer in
