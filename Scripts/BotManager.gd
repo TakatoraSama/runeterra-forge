@@ -5,9 +5,11 @@ extends Node
 ##
 ## Architecture (synchronous):
 ##   GameManager.begin_round_start() calls BotManager.on_round_start() directly
-##   after mana is refilled. The bot draws a card and queues its play in
-##   CardManager._pending_opponent_cards synchronously — no timers, no signals.
+##   after mana is refilled. The bot draws a card and queues its play through
+##   CardManager.queue_opponent_card_play() synchronously — no timers, no signals.
 ##   At RESOLVE the opponent-card-spawning path handles the rest normally.
+## This is the old engine's offline bot (`--engine=old`); the M5a LAN session uses
+## MatchBot on the new engine instead.
 
 var bot_enabled: bool = false
 
@@ -153,12 +155,12 @@ func _decide_bot_play() -> void:
 
 	var chosen_cost: int = _bot_card_cost(chosen_index)
 
-	# Spend mana and queue the play. _receive_opponent_card_play() appends to
+	# Spend mana and queue the play. queue_opponent_card_play() appends to
 	# _pending_opponent_cards; the card is spawned face-down at RESOLVE start
 	# and flips + fires on_summon() exactly like a real opponent's card.
 	_game_manager.spend_player_mana(0, chosen_cost)
 	_bot_hand.remove_at(chosen_index)
 	_bot_hand_cost_mod.remove_at(chosen_index)
-	_card_manager._receive_opponent_card_play(chosen, col, 0)
+	_card_manager.queue_opponent_card_play(chosen, col, 0)
 
 	print("BotManager: Queued '%s' (cost %d) to column %d" % [chosen, chosen_cost, col])

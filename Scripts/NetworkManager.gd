@@ -2,23 +2,26 @@ extends Node
 
 class_name NetworkManager
 
+## The LAN transport of M5a. ENet stays, but this class is now ONLY the peer: it opens
+## the connection, closes it, and reports who joined or left. It no longer knows about
+## players, assignments or readiness — M5a moved all of that into MatchNet's handshake
+## (Scripts/Presentation/MatchNet.gd), which is the only file with an @rpc annotation.
+##
+## Player ids are absolute (0 = host, 1 = guest) and travel with the session, never with
+## the connection: nothing here maps a peer id onto a player id, because the host is
+## always player 0 and the guest always player 1.
+
 signal player_connected(peer_id: int)
 signal player_disconnected(peer_id: int)
-signal all_players_ready
-signal game_can_start
 
 const DEFAULT_PORT := 9999
-const MAX_PLAYERS := 2
 
-# Maps peer_id -> player_id (0 or 1)
-var peer_to_player: Dictionary = {}
-# Maps player_id -> peer_id
-var player_to_peer: Dictionary = {}
+## M5a is a two-player game: one host and exactly one guest. create_server(port, 2) used
+## to admit a second client to the same match, which has no meaning now that the host
+## runs one MatchHost and would have to decide which of two guests is player 1.
+const MAX_PLAYERS := 1
 
-var local_player_id: int = 1  # Always 1 for local view (bottom side)
 var is_host: bool = false
-var players_ready: Dictionary = {}  # peer_id -> bool
-var _offline_mode: bool = false
 
 
 func _ready() -> void:
@@ -36,19 +39,11 @@ func host_game(port: int = DEFAULT_PORT) -> Error:
 	if error != OK:
 		print("Failed to create server: ", error)
 		return error
-	
+
 	multiplayer.multiplayer_peer = peer
 	is_host = true
-	
-	# Host is player 0 (top side from their own view, but they see themselves as bottom)
-	# In a mirrored view: host = player 0, client = player 1
-	# But each player always sees themselves as the bottom player locally
-	var my_peer_id = multiplayer.get_unique_id()
-	peer_to_player[my_peer_id] = 0
-	player_to_peer[0] = my_peer_id
-	local_player_id = 1  # Locally, you always see yourself as bottom (player 1)
-	
-	print("Server started on port ", port, ". Peer ID: ", my_peer_id)
+
+	print("Server started on port ", port, ". Peer ID: ", multiplayer.get_unique_id())
 	return OK
 
 
@@ -59,81 +54,40 @@ func join_game(address: String = "127.0.0.1", port: int = DEFAULT_PORT) -> Error
 	if error != OK:
 		print("Failed to connect to server: ", error)
 		return error
-	
+
 	multiplayer.multiplayer_peer = peer
 	is_host = false
-	local_player_id = 1  # Locally, you always see yourself as bottom (player 1)
-	
+
 	print("Connecting to ", address, ":", port)
 	return OK
 
 
-# --- Get the "real" player ID for network (0 = host, 1 = client) ---
-func get_network_player_id() -> int:
-	"""Returns the actual network player ID (0 for host, 1 for client)"""
-	var my_peer_id = multiplayer.get_unique_id()
-	return peer_to_player.get(my_peer_id, 0)
-
-
-# --- Check if it's our turn to do something (both play simultaneously) ---
-func is_local_action() -> bool:
-	"""In Marvel Snap style, both players act simultaneously, so always true during PLAY"""
-	return true
-
-
-# --- Convert local zone to network zone ---
-func local_zone_to_network(zone_key: Vector2i) -> Vector2i:
-	"""
-	Convert a zone from local view to network view.
-	Locally, player is always row 1 (bottom), enemy is row 0 (top).
-	On network: host is player 0, client is player 1.
-	For the host, their 'own' row is 0 on network, so we flip.
-	For the client, their 'own' row is 1 on network, so no flip needed.
-	"""
-	if is_host:
-		# Host: local row 1 (my side) -> network row 0
-		return Vector2i(zone_key.x, 1 - zone_key.y)
-	else:
-		# Client: local row 1 (my side) -> network row 1
-		return zone_key
-
-
-func network_zone_to_local(zone_key: Vector2i) -> Vector2i:
-	"""Convert a network zone to local view."""
-	if is_host:
-		return Vector2i(zone_key.x, 1 - zone_key.y)
-	else:
-		return zone_key
+# --- Close the session ---
+## Drops the peer and clears every session flag. The peer is closed BEFORE it is
+## nulled, so the OS socket is released immediately: leave_to_lobby() reloads the scene
+## right after this, and a socket that outlived the scene would keep the port bound.
+## Emitting nothing here on purpose — MatchNet already turned a real disconnect into
+## session_ended, and this is the deliberate local one.
+func close() -> void:
+	var peer: MultiplayerPeer = multiplayer.multiplayer_peer
+	if peer != null:
+		peer.close()
+	multiplayer.multiplayer_peer = null
+	is_host = false
+	print("Network session closed.")
 
 
 # --- Callbacks ---
+## Only the host ever sees this (the guest's peer arrives through this same signal, but
+## a client gets server_disconnected instead). The peer id is handed on untouched:
+## MatchNet decides whether this peer is allowed to speak to the host.
 func _on_peer_connected(peer_id: int) -> void:
 	print("Peer connected: ", peer_id)
-	
-	if is_host:
-		# Assign the client as player 1
-		peer_to_player[peer_id] = 1
-		player_to_peer[1] = peer_id
-		
-		# Tell the client their assignment
-		rpc_id(peer_id, "_receive_player_assignment", 1)
-		
-		print("Player 1 assigned to peer: ", peer_id)
-		emit_signal("player_connected", peer_id)
-		
-		# Both players connected, game can start
-		if peer_to_player.size() >= MAX_PLAYERS:
-			emit_signal("all_players_ready")
-			# call_local ensures this also runs on the host
-			rpc("_notify_game_can_start")
+	emit_signal("player_connected", peer_id)
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("Peer disconnected: ", peer_id)
-	if peer_to_player.has(peer_id):
-		var player_id = peer_to_player[peer_id]
-		player_to_peer.erase(player_id)
-		peer_to_player.erase(peer_id)
 	emit_signal("player_disconnected", peer_id)
 
 
@@ -141,44 +95,15 @@ func _on_connected_to_server() -> void:
 	print("Connected to server! My peer ID: ", multiplayer.get_unique_id())
 
 
+## The address was unreachable. The peer is dropped so the next join attempt starts
+## from a clean slate; the caller retries (LobbyUI's --autojoin does, up to 15 times).
 func _on_connection_failed() -> void:
 	print("Connection failed!")
 	multiplayer.multiplayer_peer = null
 
 
+## The host is gone. MatchNet's own server_disconnected handler turns this into
+## session_ended, so this callback only reports it.
 func _on_server_disconnected() -> void:
 	print("Server disconnected!")
 	multiplayer.multiplayer_peer = null
-
-
-# --- RPCs ---
-@rpc("authority", "reliable")
-func _receive_player_assignment(player_id: int) -> void:
-	var my_peer_id = multiplayer.get_unique_id()
-	peer_to_player[my_peer_id] = player_id
-	player_to_peer[player_id] = my_peer_id
-	print("Assigned as player: ", player_id)
-
-
-@rpc("authority", "call_local", "reliable")
-func _notify_game_can_start() -> void:
-	print("All players ready! Game can start.")
-	emit_signal("game_can_start")
-
-
-# --- Offline / Solo mode ---
-func start_offline() -> void:
-	"""Start in offline mode (no networking, single player testing)"""
-	_offline_mode = true
-	is_host = true
-	local_player_id = 1
-	peer_to_player[1] = 0  # Fake host
-	player_to_peer[0] = 1
-	print("Started in offline mode. Player ID: ", local_player_id)
-
-
-func is_online() -> bool:
-	"""Check if we're in a multiplayer session"""
-	if _offline_mode:
-		return false
-	return multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED

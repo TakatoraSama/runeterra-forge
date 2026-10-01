@@ -313,10 +313,6 @@ func _perform_level_up(new_card_id: String) -> void:
 	if _display_card_id == "":
 		_display_card_id = old_id
 
-	# Notify opponent: only broadcast for locally-owned cards to prevent echo
-	if is_local_card and _card_manager._is_online():
-		_card_manager.rpc("_receive_opponent_level_up", old_id, new_card_id)
-
 	# ── 0. Register as pending, then acquire global level-up lock ────────
 	if _card_manager:
 		_card_manager._level_up_pending += 1
@@ -337,9 +333,9 @@ func _perform_level_up(new_card_id: String) -> void:
 		old_name, old_name, old_id, new_name, new_card_id])
 
 	# ── 8. Upgrade all remaining copies (hand, deck, other board cards) ──────────
-	# Only for locally-owned cards; opponent copies are synced via RPC inside
-	# upgrade_all_copies. This fires AFTER the animation so the opponent sees the
-	# primary animation complete before receiving the global upgrade notice.
+	# Only for locally-owned cards; the opponent's copies are upgraded by their own
+	# side, from the level-up the engine reports. This fires AFTER the animation, so
+	# the owner sees the full animation before its other copies change.
 	if is_local_card and _card_manager:
 		_card_manager.upgrade_all_copies(old_id, new_card_id)
 

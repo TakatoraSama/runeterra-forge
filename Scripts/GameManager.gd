@@ -44,7 +44,6 @@ class PlayerManaState:
 # Node references (resolved in _ready)
 @onready var card_manager: Node = $"../CardManager"
 @onready var deck_reference: Node = $"../Deck"
-@onready var network_manager: Node = $"../NetworkManager"
 @onready var board_reference: Node = $"../Board"
 @onready var turn_text: Node = $"../CardManager/TurnText"
 @onready var mana_text: Node = $"../CardManager/ManaText"
@@ -57,10 +56,8 @@ var round_phase: int = RoundPhase.NONE
 var turn_number: int = 0
 var active_player_id: int = 1
 var flip_first_player_id: int = -1  # Player who acts first during resolve and ability phases
-var flip_first_network_id: int = -1  # Same player as flip_first_player_id, but as a network id (0 = host, 1 = client) — perspective-independent
 
 var _mana_by_player: Dictionary = {}
-var _players_ended_turn: Dictionary = {}  # peer_id -> bool, tracks who hit End Turn
 var _pending_bonus_mana: Dictionary = {}  # player_id -> int, bonus mana to apply next turn
 var _active_temp_mana: Dictionary = {}    # player_id -> int, temp bonus currently active (removed next turn)
 
@@ -101,32 +98,18 @@ func start_game() -> void:
 			victory_text.visible = false
 	_emit_phase()
 
-	# --- Assign flip first: server decides, then syncs to client ---
-	if _is_online():
-		if multiplayer.is_server():
-			var chosen = randi_range(0, 1)
-			# Map server's player_id to each client's local perspective:
-			# Server (host) is network player 0, client is network player 1.
-			# Locally each player sees themselves as player 1.
-			# So if chosen == 0 (host wins), host sees 0 (opponent), client sees 1 (you) — wrong.
-			# We need to send the raw network player id and let each side interpret it.
-			rpc("_sync_flip_first", chosen)
-		# else: client waits for server's RPC
-	else:
-		# Offline: just pick locally
-		flip_first_player_id = randi_range(0, 1)
-		flip_first_network_id = flip_first_player_id  # Offline: local id == network id
-		_sync_flip_first_to_card_manager()
-		emit_signal("flip_first_changed", flip_first_player_id)
-		print("Flip first assigned to player: ", flip_first_player_id)
-
+	# --- Assign flip first: picked locally. M5a runs one engine on the host, so the
+	# old server-decides / client-waits split and its _sync_flip_first RPC are gone:
+	# every peer picks its own value from the same local state, and the LAN session is
+	# driven by Scripts/Match instead (this file is only reached by --engine=old).
+	flip_first_player_id = randi_range(0, 1)
+	_sync_flip_first_to_card_manager()
+	emit_signal("flip_first_changed", flip_first_player_id)
+	print("Flip first assigned to player: ", flip_first_player_id)
 	# --- Game Start: shuffle deck and trigger game start abilities FIRST ---
 	# IMPORTANT: must happen before lane assignment so that lane-reveal effects
 	# (e.g. Hexcore Foundry's synchronous draw_cards call inside _fire_immediate_effects)
 	# cannot remove Azir1 from the deck before trigger_game_start_abilities() iterates it.
-	# In multiplayer the client skips _sync_lane_assignment locally (waits for server RPC),
-	# so game-start always runs before any lane effect on the client side — this reorder
-	# makes the host/offline path consistent with that.
 	if deck_reference and deck_reference.has_method("shuffle_deck"):
 		deck_reference.shuffle_deck()
 
@@ -134,16 +117,9 @@ func start_game() -> void:
 	if deck_reference and deck_reference.has_method("trigger_game_start_abilities"):
 		await deck_reference.trigger_game_start_abilities()
 
-	# --- Lane assignment: server picks, syncs to all clients ---
+	# --- Lane assignment: picked locally and applied to both rows ---
 	# Done AFTER game-start abilities so lane-reveal side effects fire in correct order.
-	if _is_online():
-		if multiplayer.is_server():
-			var lane_ids = board_reference.pick_random_lane_ids()
-			rpc("_sync_lane_assignment", lane_ids)
-		# else: client waits for server RPC
-	else:
-		var lane_ids = board_reference.pick_random_lane_ids()
-		_sync_lane_assignment(lane_ids)
+	_sync_lane_assignment(board_reference.pick_random_lane_ids())
 
 	# Draw initial hand after lane assignment
 	if deck_reference and deck_reference.has_method("draw_cards"):
@@ -247,55 +223,19 @@ func end_play_phase() -> void:
 	if card_manager and card_manager.has_method("cancel_active_drag"):
 		card_manager.cancel_active_drag()
 	
-	# Multiplayer: notify server we ended our turn
-	if _is_online():
-		# Sync hand data to opponent for behold calculations
-		if card_manager and card_manager.has_method("sync_hand_data"):
-			card_manager.sync_hand_data()
-		var my_peer_id = multiplayer.get_unique_id()
-		if multiplayer.is_server():
-			_on_player_end_turn(my_peer_id)
-		else:
-			rpc_id(1, "_on_player_end_turn", my_peer_id)
-		end_turn_button.disabled = true
-		return  # Wait for server to call _proceed_to_resolve
-	
-	# Offline: proceed immediately
+	# Offline and --engine=old proceed immediately: the old per-peer end-turn counter
+	# (_on_player_end_turn) existed only so the two clients would agree when to resolve.
 	_proceed_to_resolve()
 
 
-@rpc("any_peer", "reliable")
-func _on_player_end_turn(peer_id: int) -> void:
-	"""Server-side: track which players have ended their turn"""
-	if not multiplayer.is_server():
-		return
-	_players_ended_turn[peer_id] = true
-	print("Player (peer %d) ended turn. %d/%d ready" % [peer_id, _players_ended_turn.size(), player_count])
-	
-	# Check if all players have ended turn
-	if _players_ended_turn.size() >= player_count:
-		_players_ended_turn.clear()
-		# call_local ensures this also runs on the host
-		rpc("_proceed_to_resolve")
-
-
-@rpc("authority", "call_local", "reliable")
 func _proceed_to_resolve() -> void:
-	"""All players ended turn, proceed to swap lane phase then resolve phase"""
+	"""The player ended their turn: swap lane phase, then resolve."""
 	_set_round_phase(RoundPhase.SWAP_LANE)
 	await _swap_lane_phase()
 
 	_set_round_phase(RoundPhase.RESOLVE)
-	seed(_shared_seed())  # Sync RNG so both clients pick identical ability targets
-	if OS.is_debug_build():
-		print("[SYNC] turn=%d phase=resolve seed=%d" % [turn_number, _shared_seed()])
 	StunManager.on_resolve_start(turn_number)  # Expire stuns from previous turns
 	await _resolve_phase()
-
-	# Re-sync hand state after resolve so resolve-created cards (e.g. Trundle's Ice Pillar)
-	# are included in opponent_hand_card_ids for behold calculations at game end.
-	if _is_online() and card_manager and card_manager.has_method("sync_hand_data"):
-		card_manager.sync_hand_data()
 
 	# Update zone power texts after cards are revealed
 	_update_zone_power_display()
@@ -313,7 +253,6 @@ func _proceed_to_resolve() -> void:
 	_update_zone_power_display()
 	
 	# Check lane winners and reassign flip first
-	_log_sync_lanes("round_end")
 	check_lane_winners_and_update_flip_first()
 	
 	start_next_turn()
@@ -330,10 +269,6 @@ func _swap_lane_phase() -> void:
 			if is_instance_valid(card):
 				card.visible = false
 				hidden_cards.append(card)
-
-	# Apply opponent swaps that were queued during PLAY phase
-	if card_manager and card_manager.has_method("apply_pending_opponent_swaps"):
-		card_manager.apply_pending_opponent_swaps()
 
 	# Run swap animations (snap to origin, then tween to destination)
 	await SwapLaneManager.execute_swaps()
@@ -359,18 +294,11 @@ func end_game() -> void:
 	round_phase = RoundPhase.NONE
 	_emit_phase()
 
-	# Sync RNG for game-end abilities: both clients share turn_number and
-	# flip_first_network_id (synced via RPC), so this seed is identical on host
-	# and client with no extra network call needed.
-	seed(_shared_seed())
-	if OS.is_debug_build():
-		print("[SYNC] turn=%d phase=game_end seed=%d" % [turn_number, _shared_seed()])
-
 	# Trigger Game End abilities in play order
 	if card_manager and card_manager.has_method("trigger_game_end_abilities"):
 		await card_manager.trigger_game_end_abilities()
-	_log_sync_lanes("game_end")
 
+	# Update zone power display after the last abilities resolved
 	_update_zone_power_display()
 	_show_match_result_text(_determine_match_winner_local())
 	
@@ -464,80 +392,24 @@ func set_flip_first_player_id(player_id: int) -> void:
 	print("Flip first changed to player: ", flip_first_player_id)
 
 
-@rpc("authority", "call_local", "reliable")
 func _sync_lane_assignment(lane_ids: Array) -> void:
-	"""Server broadcasts the authoritative lane ID order [left, mid, right].
-	Both server and client apply the same lane data."""
+	"""Applies the authoritative lane ID order [left, mid, right] to both rows.
+	Was an RPC that the server broadcast to every client; it is a plain local call now,
+	because the LAN session no longer runs this turn loop at all."""
 	if board_reference and board_reference.has_method("create_lanes_from_ids"):
 		board_reference.create_lanes_from_ids(lane_ids)
-	print("Lane assignment synced: ", lane_ids)
+	print("Lane assignment: ", lane_ids)
 
-
-@rpc("authority", "call_local", "reliable")
-func _sync_flip_first(network_player_id: int) -> void:
-	"""Server broadcasts the authoritative flip_first as a network player id.
-	Network player 0 = host, network player 1 = client.
-	Locally, each player sees themselves as player 1 (bottom).
-	So host maps: network 0 -> local 1 (me), network 1 -> local 0 (opponent).
-	Client maps: network 0 -> local 0 (opponent), network 1 -> local 1 (me)."""
-	flip_first_network_id = network_player_id
-	var local_id: int
-	if _is_online():
-		var my_network_id = network_manager.get_network_player_id()
-		if network_player_id == my_network_id:
-			local_id = 1  # I have priority
-		else:
-			local_id = 0  # Opponent has priority
-	else:
-		local_id = network_player_id
-	
-	set_flip_first_player_id(local_id)
-	print("Flip first synced: network_id=%d -> local_id=%d" % [network_player_id, local_id])
-
-
-func _shared_seed() -> int:
-	"""RNG seed shared by both peers for the resolve and game-end phases.
-	Built from flip_first_network_id (not flip_first_player_id): the local id is
-	perspective-dependent (each client sees itself as player 1), so host and guest
-	would otherwise derive different seeds and pick different random targets."""
-	return turn_number * 7919 + flip_first_network_id * 1337
-
-
-func _log_sync_lanes(label: String) -> void:
-	"""Debug-only board snapshot used by tools/lan_selftest.sh to compare peers.
-	Prints network player ids (0 = host, 1 = client), never local ones, so the
-	line is byte-identical on both peers while the match is in sync."""
-	if not OS.is_debug_build():
-		return
-	var p0: Array[int] = []
-	var p1: Array[int] = []
-	var my_net: int = network_manager.get_network_player_id() if _is_online() else 0
-	for network_id in range(2):
-		# Online: my row is 1, the opponent's row is 0. Offline: row == network id.
-		var row: int = (1 if network_id == my_net else 0) if _is_online() else network_id
-		var powers: Array[int] = []
-		for col in range(3):
-			powers.append(_get_zone_total_power(Vector2i(col, row)))
-		if network_id == 0:
-			p0 = powers
-		else:
-			p1 = powers
-	print("[SYNC] turn=%d %s lanes p0=[%d,%d,%d] p1=[%d,%d,%d]" % [
-		turn_number, label, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2],
-	])
 
 
 func check_lane_winners_and_update_flip_first() -> void:
 	"""After Round End, check lane winners. Player winning 2+ of 3 lanes gets flip first.
 	If tied on lanes, compare total power across all lanes. If still tied, random.
-	In multiplayer, only the server decides and syncs via RPC."""
+	The result is applied to this peer only: there is no longer a second client whose
+	view has to be told about it."""
 	if not board_reference:
 		return
-	
-	# In online mode, only the server should decide
-	if _is_online() and not multiplayer.is_server():
-		return
-	
+
 	var player_0_lanes_won := 0
 	var player_1_lanes_won := 0
 	var total_power_0 := 0
@@ -557,31 +429,25 @@ func check_lane_winners_and_update_flip_first() -> void:
 	
 	print("Lane wins - Player 0: %d, Player 1: %d | Total power - P0: %d, P1: %d" % [player_0_lanes_won, player_1_lanes_won, total_power_0, total_power_1])
 	
-	# Determine winner as network player id (0 = host side, 1 = client side)
-	# On the server, row 0 = opponent (client, network 1), row 1 = me (host, network 0)
-	# So server's local player_0 (row 0) is actually network player 1
-	# and server's local player_1 (row 1) is network player 0
-	var winner_network_id: int = -1
-	
+	# Determine the winning row: 0 = top, 1 = bottom. There is no network id any more
+	# (M5a LAN is played through Scripts/Match, where ids are absolute).
+	var winner_row: int = -1
+
 	if player_0_lanes_won > player_1_lanes_won:
-		winner_network_id = _local_to_network_player(0)
+		winner_row = 0
 	elif player_1_lanes_won > player_0_lanes_won:
-		winner_network_id = _local_to_network_player(1)
+		winner_row = 1
 	elif total_power_0 > total_power_1:
-		winner_network_id = _local_to_network_player(0)
+		winner_row = 0
 		print("Lanes tied, player in row 0 wins on total power.")
 	elif total_power_1 > total_power_0:
-		winner_network_id = _local_to_network_player(1)
+		winner_row = 1
 		print("Lanes tied, player in row 1 wins on total power.")
 	else:
-		winner_network_id = randi_range(0, 1)
+		winner_row = randi_range(0, 1)
 		print("Lanes and total power tied, flip first randomly reassigned.")
-	
-	if _is_online():
-		rpc("_sync_flip_first", winner_network_id)
-	else:
-		flip_first_network_id = winner_network_id
-		set_flip_first_player_id(winner_network_id)
+
+	set_flip_first_player_id(winner_row)
 
 
 func _get_zone_total_power(zone_key: Vector2i) -> int:
@@ -743,24 +609,6 @@ func _on_end_turn_button_pressed() -> void:
 		controller.submit_local(MatchIntents.end_turn())
 		return
 	end_play_phase()
-
-
-func _is_online() -> bool:
-	"""Check if we are in a multiplayer session"""
-	if network_manager and network_manager.has_method("is_online"):
-		return network_manager.is_online()
-	return false
-
-
-func _local_to_network_player(local_player_id: int) -> int:
-	"""Convert a local player id (0=top row, 1=bottom row) to a network player id.
-	Each player sees themselves as row 1 (bottom), so:
-	  - Host: local 1 = network 0 (host), local 0 = network 1 (client)
-	  - Client: local 1 = network 1 (client), local 0 = network 0 (host)
-	This is only called on the server (host), so local 1 = network 0, local 0 = network 1."""
-	if _is_online():
-		return 1 - local_player_id  # Host: my row 1 is network 0, opponent row 0 is network 1
-	return local_player_id
 
 
 # ----------------------------

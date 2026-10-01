@@ -26,13 +26,6 @@ var pending_swaps: Array = []
 ##                cause_card_id, from_zone, to_zone, turn_number}
 var swap_history: Array = []
 
-## Multiplayer sync: emitted when the opponent's swap-arrive ability (incl. level-up) finishes.
-signal _swap_step_done
-## Semaphore: counts "step done" notifications received from the opponent.
-## Using a counter (not a bool) handles the case where multiple notifications
-## arrive before the awaiting coroutine has a chance to consume them.
-var _swap_steps_received: int = 0
-
 
 # ── Scene-tree helpers ────────────────────────────────────────────────────────
 
@@ -50,7 +43,6 @@ func reset() -> void:
 	"""Clear all swap state. Called by GameManager.start_game() for each new match."""
 	pending_swaps.clear()
 	swap_history.clear()
-	_swap_steps_received = 0
 	print("SwapLaneManager: reset — all swap state cleared.")
 
 
@@ -116,7 +108,6 @@ func execute_swaps() -> void:
 		return
 
 	var sorted_swaps := _sort_swaps_by_flip_first(pending_swaps, card_manager.flip_first_player_id)
-	_swap_steps_received = 0  # reset semaphore for this phase
 
 	# ── Step 1: snap all cards instantly back to their origin zones ────────
 	for entry in sorted_swaps:
@@ -178,29 +169,14 @@ func execute_swaps() -> void:
 		await tween.finished
 		card.z_index = 0  # Restore to CARD_BOARD_Z_INDEX
 
-		# Does this card have a swap-arrive ability that takes meaningful time?
-		var _cd: Dictionary = CardDatabase.CARDS.get(card.card_id, {})
-		var _has_ability: bool = _cd.get("AbilityType", "").begins_with("swap_arrive_")
-
-		# Fire swap-arrive ability only for locally-owned cards.
-		# Both clients run execute_swaps(), but abilities must only resolve
-		# on the owning player's client to avoid double-recall RPCs.
+		# Fire the swap-arrive ability only for locally-owned cards: the owner resolves
+		# it and the opponent learns the outcome from the engine's events.
 		if card.owner_player_id == card_manager.current_player_id:
 			await AbilityResolver.execute_swap_arrive_ability(card, to_zone, from_zone)
-			# In multiplayer: notify opponent that our ability (incl. level-up) is fully done.
-			if card_manager._is_online() and _has_ability:
-				card_manager.rpc("_rpc_notify_swap_step_done")
-		elif card_manager._is_online() and _has_ability:
-			# Opponent owns this card — wait for their "ability done" notification so both
-			# clients stay in sync (e.g. both see the full level-up before the next swap).
-			if _swap_steps_received <= 0:
-				await _swap_step_done
-			_swap_steps_received -= 1
 
-		# Reposition to_zone after ability to fix slot assignments on opponent's client.
-		# If a recall RPC arrived early (before Ahri was inserted into the zone),
-		# cards_by_zone may be out of sync. This compacts the zone correctly on both clients.
-		# On the local client, recall_card already repositioned — this is a no-op.
+		# Reposition to_zone after the ability to fix the slot assignments the
+		# ability may have disturbed. On the local client recall_card already
+		# repositioned, so this is a no-op there.
 		board.reposition_cards_in_zone(to_zone)
 
 		# Record in permanent history

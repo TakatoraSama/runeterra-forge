@@ -36,16 +36,6 @@ func _get_game_manager() -> Node:
 	return get_node_or_null("/root/Main/GameManager")
 
 
-func _get_network_manager() -> Node:
-	return get_node_or_null("/root/Main/NetworkManager")
-
-
-func _is_online() -> bool:
-	var nm := _get_network_manager()
-	if nm and nm.has_method("is_online"):
-		return nm.is_online()
-	return false
-
 
 func pick_random_target(valid_targets: Array) -> Node:
 	"""Return a random resolved entry from valid_targets, or null if none.
@@ -597,8 +587,6 @@ func _ability_spinning_axe(card: Node) -> void:
 		print("%s {Play}: discarded %s, granted %s +%d Power (now %d)" % [
 			my_name, target_name, draven_name, power_bonus, draven_card.get_current_power()])
 		cm._notify_zone_power_changed()
-		if cm._is_online():
-			cm.rpc("_receive_opponent_power_buff", draven_card.card_id, power_bonus)
 	else:
 		print("%s {Play}: discarded %s (no Draven on board to buff)" % [my_name, target_name])
 
@@ -649,13 +637,12 @@ func _ability_mana_ramp(card: Node) -> void:
 
 func _ability_recall_allies_same_lane(card: Node) -> void:
 	"""NavoriConspirator {Play}: recall all other allied Champions/Followers in this lane.
-	Only runs on the card owner's client — the opponent is notified via RPC inside recall_card."""
+	Only runs on the card owner's side — the opponent learns the outcome from events."""
 	var board := _get_board()
 	var cm    := _get_card_manager()
 	if not board or not cm or not card.card_slot_is_in:
 		return
-	# Multiplayer guard: only the owner's client executes the recall.
-	# The opponent receives _receive_opponent_recall RPCs from recall_card() instead.
+	# Owner gate: only the owner's side executes the recall.
 	if card.owner_player_id != cm.current_player_id:
 		return
 
@@ -743,11 +730,11 @@ func _ability_recall_cost_allies(card: Node) -> void:
 
 func _ability_discard_by_cost_bracket(card: Node) -> void:
 	"""Rumble {Play}: discard up to 3 cards from hand — one per cost bracket (≤2, 3–4, 5+).
-	Grants +2 Power for each card discarded. Uses seeded RNG for multiplayer sync."""
+	Grants +2 Power for each card discarded. Uses the local RNG for the bracket picks."""
 	var cm := _get_card_manager()
 	if not cm:
 		return
-	# Only the card owner's client performs the discard (opponent gets RPC).
+	# Owner gate: only the owner's side performs the discard.
 	if card.owner_player_id != cm.current_player_id:
 		return
 
@@ -782,16 +769,12 @@ func _ability_discard_by_cost_bracket(card: Node) -> void:
 		var pick_id = pick.card_id
 		print("%s {Play}: discarding %s (cost %d)" % [card_name, pick_id, pick.get_current_cost()])
 		await cm.discard_card_from_hand(pick, card.card_id)
-		if _is_online():
-			cm.rpc("_receive_opponent_discard", pick_id, card.card_id)
 		discard_count += 1
 
 	if discard_count > 0:
 		var buff = 2 * discard_count
 		card.power_modifier += buff
 		print("%s {Play}: gained +%d Power (%d cards discarded)" % [card_name, buff, discard_count])
-		if _is_online():
-			cm.rpc("_receive_opponent_power_buff", card.card_id, buff)
 		cm._notify_zone_power_changed()
 
 	# Pause everything: if Rumble met his level-up condition, block until animation completes.
@@ -1388,7 +1371,7 @@ func _ability_game_end_sion_summon(card_id: String, card_data: Dictionary, owner
 
 func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 	"""Azir {Game Start}: summon a Buried Sun Disc in the mid-lane on the owner's side.
-	In multiplayer, the opponent is notified via RPC so they can place it on their board."""
+	On M5a LAN the opponent sees the summon as an engine event, not as a mirror RPC."""
 	var board := _get_board()
 	var cm    := _get_card_manager()
 	if not board or not cm:
@@ -1435,60 +1418,6 @@ func _game_start_summon_sun_disc(owner_player_id: int) -> void:
 	cm.track_created_card(sun_disc, owner_player_id, "Azir1")  # created by Azir
 
 	print("Buried Sun Disc summoned at mid lane!")
-
-	# Multiplayer: notify opponent (mirror the zone row from our side to theirs)
-	if _is_online():
-		var mirrored: Vector2i = Vector2i(mid_zone.x, 1 - mid_zone.y)
-		rpc("_receive_opponent_game_start_summon", "BuriedSunDisc", mirrored.x, mirrored.y)
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_game_start_summon(card_id_str: String, zone_col: int, zone_row: int) -> void:
-	"""Receive the opponent's {Game Start} summon and place their card face-up on our board."""
-	var board := _get_board()
-	var cm    := _get_card_manager()
-	if not board or not cm:
-		return
-
-	var zone_key: Vector2i = Vector2i(zone_col, zone_row)
-	var zone_slots: Array  = board.slots_by_zone.get(zone_key, [])
-
-	var available_slot = null
-	for slot in zone_slots:
-		if not slot.card_in_slot:
-			available_slot = slot
-			break
-	if not available_slot:
-		print("AbilityResolver: no slot for opponent game-start summon in zone: ", zone_key)
-		return
-
-	var card_data = CardDatabase.CARDS.get(card_id_str)
-	var card_scene = CardDatabase.get_card_scene(card_data)
-	var opp_card   = card_scene.instantiate()
-
-	opp_card.card_id         = card_id_str
-	opp_card.owner_player_id = 0  # opponent is always player 0 from our view
-
-	if card_data:
-		CardDatabase.populate_card_visuals(opp_card, card_data)
-
-	opp_card.position                                       = available_slot.position
-	opp_card.scale                                          = Vector2(0.15, 0.15)
-	opp_card.z_index                                        = 0
-	opp_card.card_slot_is_in                                = available_slot
-	opp_card.get_node("Area2D/CollisionShape2D").disabled   = true
-	opp_card.is_resolved                                    = true
-	if opp_card.has_method("hide_card_back"):
-		opp_card.hide_card_back()
-
-	cm.add_child(opp_card)
-	available_slot.card_in_slot = true
-	board.add_card_to_zone(zone_key, opp_card)
-	cm.add_card_to_play_order(opp_card)
-	cm.track_summoned_card(opp_card, false)  # summoned directly (not from hand)
-	cm.track_created_card(opp_card, opp_card.owner_player_id, "Azir1")  # created by opponent's Azir
-
-	print("Opponent game-start summon received: %s in zone %s" % [card_id_str, str(zone_key)])
 
 
 # ─── Swap-arrive abilities ─────────────────────────────────────────────────────
@@ -1604,55 +1533,6 @@ func _ability_swap_arrive_summon_blade(card: Node, from_zone: Vector2i) -> void:
 	await cm._wait_for_level_up()
 
 	print("Irelia swap-arrive: Blade summoned at zone %s" % str(from_zone))
-
-	# Multiplayer: notify opponent to mirror-summon the Blade
-	if _is_online():
-		var mirrored := Vector2i(from_zone.x, 1 - from_zone.y)
-		rpc("_receive_opponent_irelia_blade_summon", mirrored.x, mirrored.y, owner_id, card.card_id)
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_irelia_blade_summon(zone_col: int, zone_row: int,
-		owner_player_id: int, creator_card_id: String) -> void:
-	"""Receive Irelia's Blade summon from the opponent's ability resolution."""
-	var board := _get_board()
-	var cm    := _get_card_manager()
-	if not board or not cm:
-		return
-
-	var zone_key := Vector2i(zone_col, zone_row)
-	var zone_slots: Array = board.slots_by_zone.get(zone_key, [])
-	var available_slot = null
-	for slot in zone_slots:
-		if not slot.card_in_slot:
-			available_slot = slot
-			break
-	if not available_slot:
-		print("Irelia blade RPC: no slot in zone %s" % str(zone_key))
-		return
-
-	var card_scene = CardDatabase.get_card_scene(CardDatabase.CARDS["Blade"])
-	var blade = card_scene.instantiate()
-	blade.card_id = "Blade"
-	blade.owner_player_id = owner_player_id
-	CardDatabase.populate_card_visuals(blade, CardDatabase.CARDS["Blade"])
-	blade.position = available_slot.position
-	blade.scale = Vector2(0.15, 0.15)
-	blade.z_index = 0
-	blade.card_slot_is_in = available_slot
-	blade.get_node("Area2D/CollisionShape2D").disabled = true
-	blade.is_resolved = true
-	blade.hide_card_back()
-
-	cm.add_child(blade)
-	available_slot.card_in_slot = true
-	board.add_card_to_zone(zone_key, blade)
-	cm.add_card_to_play_order(blade)
-	cm.track_summoned_card(blade, false)
-	cm.track_created_card(blade, owner_player_id, creator_card_id)
-	cm._notify_zone_power_changed()
-
-	print("Irelia blade RPC received: Blade at zone %s" % str(zone_key))
 
 
 # ─── Updraft + Janna abilities ─────────────────────────────────────────────────

@@ -15,7 +15,6 @@ var is_hovering_on_card
 var player_hand_reference
 var board_reference
 var game_manager_reference
-var network_manager_reference
 var current_player_id: int = 1  # 0 = top player, 1 = bottom player (default)
 var flip_first_player_id: int = -1  # Synced from GameManager
 var played_cards_order: Array = []  # Cards played this turn only (cleared after resolve)
@@ -23,23 +22,20 @@ var undo_stack: Array = []          # [{card, hand_index, mana_cost, zone_key, s
 var undo_button: Button
 var all_cards_in_play_order: Array = []  # Historical: all cards that ever entered the board (append-only, never removed)
 var opponent_played_cards: Array = []  # Cards opponent played (face-down until resolve)
-var _pending_opponent_cards: Array = []  # Deferred opponent card data [{card_id, zone_col, zone_row}]
+var _pending_opponent_cards: Array = []  # Deferred opponent card data [{card_id, zone_col, zone_row}] — see queue_opponent_card_play
 var killed_cards: Array = []  # Tracks all cards killed during the game [{card_id, owner_player_id, killer_player_id, killer_card_id}]
 var summoned_cards: Array = []  # Tracks all cards that entered the board [{card_id, owner_player_id, was_played_from_hand}]
 var created_cards: Array = []  # Tracks all cards created (not from starting deck) [{card_id, owner_player_id, creator_player_id, creator_card_id, created_at_turn}]
 var recalled_cards: Array = []  # Tracks all recalls triggered by cards [{card_id, owner_player_id, recaller_player_id, recaller_card_id}]
 var discarded_cards: Array = []  # Tracks all cards discarded [{card_id, owner_player_id, discarded_by_card_id, discarded_at_turn}]
 var drawn_cards: Array = []  # Tracks all cards drawn from deck [{card_id, owner_player_id, turn}]
-var opponent_hand_card_ids: Array = []  # Synced from opponent via RPC for behold calculations
 var player_state: Dictionary = {}  # Per-player persistent state: {player_id: {"is_deep": bool, ...}}
 var _level_up_in_progress: bool = false  # Global lock: only one level-up animation plays at a time
 var _level_up_pending: int = 0           # Count of _perform_level_up calls still alive (waiting or animating)
 var permanently_leveled_up: Dictionary = {}  # champion Name → current highest card_id (e.g. "Azir" → "Azir2")
-var _card_resolve_done_signals: Dictionary = {}  # "ownerId_cardId" -> bool, for cross-client resolve sync
 var _is_swap_drag: bool = false           # True when dragging an Elusive board card for a lane swap
 var _swap_drag_origin_slot = null         # The slot the Elusive card came from
 var _swap_drag_origin_zone: Vector2i = Vector2i(-1, -1)  # The zone the Elusive card came from
-var _pending_opponent_swaps: Array = []  # Deferred opponent swap data [{card_id, from_col, to_col}] — applied at SWAP_LANE phase
 
 
 # ── Engine mode (offline / LAN on the Match engine) ──────────────────────────
@@ -124,14 +120,6 @@ func _show_toast(message: String) -> void:
 	label.queue_free()
 
 
-# Lightweight proxy for opponent hand cards that don't exist as scene nodes on this client.
-# Exposes .card_id and .owner_player_id so behold consumers can treat it like a Card.
-class BeheldCardProxy extends RefCounted:
-	var card_id: String = ""
-	var owner_player_id: int = -1
-	var _is_proxy: bool = true  # distinguishes from real Card nodes
-
-
 func _notify_zone_power_changed() -> void:
 	"""Recalculate auras via AuraSystem, then ask GameManager to refresh zone power labels."""
 	AuraSystem.recalculate_auras()
@@ -154,7 +142,6 @@ func _ready() -> void:
 	player_hand_reference = $"../PlayerHand"
 	board_reference = $"../Board"
 	game_manager_reference = $"../GameManager"
-	network_manager_reference = $"../NetworkManager"
 	$"../InputManager".connect("left_mouse_button_released", on_left_click_released)
 	game_manager_reference.mana_changed.connect(_on_mana_changed)
 	undo_button = $Undo
@@ -283,23 +270,18 @@ func _finish_swap_drag() -> void:
 			board_reference.add_card_to_zone(dest_zone, card_being_dragged)
 			card_being_dragged.position = dest_slot.position
 			card_being_dragged.z_index = CARD_BOARD_Z_INDEX
-			var card_id_str: String = card_being_dragged.card_id
-			var from_col: int = _swap_drag_origin_zone.x
-			var to_col: int = dest_zone.x
-			SwapLaneManager.register_swap(
-				card_being_dragged,
-				_swap_drag_origin_zone, _swap_drag_origin_slot,
-				dest_zone, dest_slot,
-				current_player_id
-			)
-			board_reference.reposition_cards_in_zone(_swap_drag_origin_zone)
-			board_reference.reposition_cards_in_zone(dest_zone)
-			if _is_online():
-				rpc("_receive_opponent_swap", card_id_str, from_col, to_col)
-			card_being_dragged = null
-			_swap_drag_origin_slot = null
-			_swap_drag_origin_zone = Vector2i(-1, -1)
-			return
+		SwapLaneManager.register_swap(
+			card_being_dragged,
+			_swap_drag_origin_zone, _swap_drag_origin_slot,
+			dest_zone, dest_slot,
+			current_player_id
+		)
+		board_reference.reposition_cards_in_zone(_swap_drag_origin_zone)
+		board_reference.reposition_cards_in_zone(dest_zone)
+		card_being_dragged = null
+		_swap_drag_origin_slot = null
+		_swap_drag_origin_zone = Vector2i(-1, -1)
+		return
 	# Invalid destination — return card to its origin slot
 	_return_swap_card_to_origin()
 
@@ -438,13 +420,6 @@ func finish_drag():
 		card_being_dragged.is_in_hand = false
 		card_being_dragged.hide_glow()
 
-		# Multiplayer: notify opponent about this card play (face-down)
-		if _is_online() and zone_key != Vector2i(-1, -1):
-			var card_id_str = str(card_being_dragged.card_id)
-			# Send the zone mirrored: my row 1 -> their row 0 (opponent's top)
-			var mirrored_zone = Vector2i(zone_key.x, 1 - zone_key.y)
-			var power_mod: int = card_being_dragged.power_modifier if "power_modifier" in card_being_dragged else 0
-			rpc("_receive_opponent_card_play", card_id_str, mirrored_zone.x, mirrored_zone.y, power_mod)
 		card_being_dragged = null
 	else:
 		_return_card_to_hand()
@@ -508,14 +483,7 @@ func resolve_played_cards() -> void:
 		card.is_resolved = true
 		# Trigger ability after reveal/flip animation (await so multi-step abilities
 		# like mass-recall fully complete before the next card flips)
-		var pre_summon_id = card.card_id  # stable key: captured before level-up can mutate card_id
 		await card.on_summon()
-		# Cross-client resolve sync: step both clients through the resolve loop together.
-		if _is_online():
-			if card.owner_player_id == current_player_id:
-				rpc("_receive_card_resolve_done", pre_summon_id)
-			else:
-				await _wait_for_opponent_card_resolve(pre_summon_id)
 		# Track Spinning Axe plays for Draven level-up (must happen BEFORE level-up checks)
 		if card.card_id == "SpinningAxe":
 			for c in all_cards_in_play_order:
@@ -671,19 +639,9 @@ func _on_undo_button_pressed() -> void:
 	played_cards_order.clear()
 	undo_stack.clear()
 
-	# Notify opponent to clear their pending cards for this turn
-	if _is_online() and multiplayer.get_peers().size() > 0:
-		rpc("_receive_undo_all_plays")
-
 	_notify_zone_power_changed()
 	_update_undo_button()
 	print("Undo: returned all played cards to hand, %d mana refunded" % total_mana_refund)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _receive_undo_all_plays() -> void:
-	_pending_opponent_cards.clear()
-	print("Received undo from opponent — cleared pending opponent cards")
 
 
 func on_left_click_released():
@@ -765,9 +723,9 @@ func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = 
 	if not is_instance_valid(card):
 		return
 
-	# Recall clears Stun. Must run before the owner check below so both clients drop
-	# the entry: the owner clears it here, the mirror clears it in
-	# _receive_opponent_recall. has_stun gates self-swaps, so the two must agree.
+	# Recall clears Stun. Must run before the owner check below so the entry goes even
+	# for a card that is about to leave the board. has_stun gates self-swaps, so the
+	# board and the stun table must not disagree about a card that is being removed.
 	StunManager.clear_stun(card)
 
 	# Release slot and remove from zone tracking
@@ -780,10 +738,6 @@ func recall_card(card, recaller_player_id: int = -1, recaller_card_id: String = 
 	if zone_key != Vector2i(-1, -1):
 		board_reference.remove_card_from_zone(zone_key, card)
 		board_reference.reposition_cards_in_zone(zone_key)
-		# Notify the opponent so their client removes the card from the same zone
-		if _is_online():
-			var mirrored_zone := Vector2i(zone_key.x, 1 - zone_key.y)
-			rpc("_receive_opponent_recall", card.card_id, mirrored_zone.x, mirrored_zone.y)
 
 	# Opponent cards are only removed from the board — do not add to local hand
 	if card.owner_player_id != current_player_id:
@@ -966,27 +920,6 @@ func discard_card_from_hand(card: Node, discarded_by_card_id: String = "") -> vo
 		LevelUpManager._check_sion_levelup()
 
 	card.queue_free()
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_discard(card_id: String, discarded_by_card_id: String) -> void:
-	"""Opponent discarded a card — track it on our side."""
-	track_discarded_card(card_id, 1 - current_player_id, discarded_by_card_id)
-
-
-@rpc("any_peer", "reliable")
-func _receive_card_resolve_done(card_id: String) -> void:
-	"""Opponent's card finished all on_summon abilities — safe to proceed in resolve loop."""
-	_card_resolve_done_signals[card_id] = true
-
-
-
-
-func _wait_for_opponent_card_resolve(key: String) -> void:
-	"""Block until the card owner's client sends the 'resolve done' signal for this card."""
-	while not _card_resolve_done_signals.get(key, false):
-		await get_tree().create_timer(0.05).timeout
-	_card_resolve_done_signals.erase(key)
 
 
 func adjust_cost(cards, delta: int) -> void:
@@ -1226,11 +1159,15 @@ func trigger_game_end_abilities() -> void:
 				await get_tree().create_timer(CARD_PAUSE_TIMER).timeout
 
 
-# --- Multiplayer RPCs ---
+## --- Deferred opponent plays (old engine's offline bot, until M5b) ---
 
-@rpc("any_peer", "reliable")
-func _receive_opponent_card_play(card_id: String, zone_col: int, zone_row: int, power_mod: int = 0) -> void:
-	"""Receive opponent's card play. Store data to spawn at resolve time (hidden during PLAY)."""
+
+func queue_opponent_card_play(card_id: String, zone_col: int, zone_row: int, power_mod: int = 0) -> void:
+	"""Queue an opponent card to appear face-down at resolve time (hidden during PLAY).
+
+	On M5a LAN the opponent's plays arrive as engine events, so nothing sends this any
+	more. The offline bot still does — it plays its own cards locally — so the queue and
+	_spawn_pending_opponent_cards stay until M5b deletes the old engine."""
 	_pending_opponent_cards.append({
 		"card_id": card_id,
 		"zone_col": zone_col,
@@ -1238,28 +1175,6 @@ func _receive_opponent_card_play(card_id: String, zone_col: int, zone_row: int, 
 		"power_mod": power_mod
 	})
 	print("Opponent card play queued: ", card_id, " for zone: ", Vector2i(zone_col, zone_row))
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_swap(card_id: String, from_col: int, to_col: int) -> void:
-	"""Queue opponent's lane swap for deferred application at SWAP_LANE phase start.
-	We do NOT move the card during PLAY phase so the local player never sees the
-	opponent's card jump to a new lane before the swap animation plays."""
-	_pending_opponent_swaps.append({"card_id": card_id, "from_col": from_col, "to_col": to_col})
-	print("Opponent swap queued: '%s' col %d → col %d (applied at SWAP_LANE phase)" % [card_id, from_col, to_col])
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_level_up(old_card_id: String, new_card_id: String) -> void:
-	"""Opponent's card leveled up — play the level-up animation on our board."""
-	for card in all_cards_in_play_order:
-		if not is_instance_valid(card):
-			continue
-		if card.card_id == old_card_id and card.card_slot_is_in \
-				and card.owner_player_id != current_player_id:
-			card._perform_level_up(new_card_id)
-			return
-	print("_receive_opponent_level_up: '%s' not found on board" % old_card_id)
 
 
 func get_upgraded_card_id(card_id: String) -> String:
@@ -1275,7 +1190,7 @@ func get_upgraded_card_id(card_id: String) -> String:
 func upgrade_all_copies(old_card_id: String, new_card_id: String) -> void:
 	"""After a champion plays its level-up animation, silently upgrade every remaining copy
 	owned by the local player: other board cards, hand cards (with flip animation), and deck
-	entries. Also notifies the opponent via RPC so their board view stays in sync."""
+	entries. On M5a LAN the opponent learns about the level-up from an engine event."""
 	# ── Board copies ──────────────────────────────────────────────────────────────
 	for card in all_cards_in_play_order:
 		if not is_instance_valid(card) or not card.card_slot_is_in:
@@ -1305,26 +1220,6 @@ func upgrade_all_copies(old_card_id: String, new_card_id: String) -> void:
 				entry["id"] = new_card_id
 		print("[GLOBAL_LEVELUP] deck entries upgraded: %s → %s" % [old_card_id, new_card_id])
 
-	# ── Notify opponent to sync their board view ──────────────────────────────────
-	if _is_online():
-		rpc("_receive_opponent_champion_level_up_global", old_card_id, new_card_id)
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_champion_level_up_global(old_card_id: String, new_card_id: String) -> void:
-	"""Opponent's champion has globally leveled up. Silently upgrade all remaining copies
-	of their card on this client's board (the primary copy was already animated by
-	_receive_opponent_level_up). Also updates opponent_hand_card_ids for behold."""
-	for card in all_cards_in_play_order:
-		if not is_instance_valid(card) or not card.card_slot_is_in:
-			continue
-		if card.card_id == old_card_id and card.owner_player_id != current_player_id:
-			card._apply_level_up_silently(new_card_id)
-	for i in range(opponent_hand_card_ids.size()):
-		if opponent_hand_card_ids[i] == old_card_id:
-			opponent_hand_card_ids[i] = new_card_id
-	print("[RPC_GLOBAL_LEVELUP] opponent champion upgraded: %s → %s" % [old_card_id, new_card_id])
-
 
 func set_player_deep(player_id: int) -> void:
 	"""Permanently mark a player as Deep (runs out of deck cards).
@@ -1338,116 +1233,6 @@ func set_player_deep(player_id: int) -> void:
 	print("Player %d is now Deep!" % player_id)
 	_notify_zone_power_changed()
 	LevelUpManager.check_level_ups_after_deep_state_change(player_id)
-	# Sync to the opponent client so their board reflects our Deep state
-	if _is_online() and player_id == current_player_id:
-		rpc("_receive_opponent_became_deep")
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _receive_opponent_became_deep() -> void:
-	"""The opponent's deck ran out — mark their player ID (always 0 from local view) as Deep."""
-	var opponent_id: int = 1 - current_player_id  # Local view: we are current_player_id, they are the other
-	if player_state.has(opponent_id) and not player_state[opponent_id].get("is_deep", false):
-		player_state[opponent_id]["is_deep"] = true
-		print("Opponent (player %d local view) is now Deep!" % opponent_id)
-		_notify_zone_power_changed()
-		LevelUpManager.check_level_ups_after_deep_state_change(opponent_id)
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_power_buff(card_id: String, buff: int) -> void:
-	"""Opponent's card gained a power buff from an ability — apply it on our board."""
-	for c in all_cards_in_play_order:
-		if is_instance_valid(c) and c.card_id == card_id and c.owner_player_id != current_player_id:
-			c.power_modifier += buff
-			_notify_zone_power_changed()
-			return
-	print("_receive_opponent_power_buff: '%s' not found on board" % card_id)
-
-
-@rpc("any_peer", "reliable")
-func _rpc_notify_swap_step_done() -> void:
-	"""Opponent finished their swap-arrive ability (including any level-up). Unblock SwapLaneManager."""
-	SwapLaneManager._swap_steps_received += 1
-	SwapLaneManager._swap_step_done.emit()
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_recall(card_id: String, zone_col: int, zone_row: int) -> void:
-	"""Opponent recalled a card — remove it from our board view and reposition the zone.
-	The card is freed entirely; the opponent's client handles adding it to their own hand."""
-	var zone_key := Vector2i(zone_col, zone_row)
-	var target_card = null
-	for c in board_reference.get_cards_in_zone(zone_key):
-		if is_instance_valid(c) and c.card_id == card_id:
-			target_card = c
-			break
-
-	if not target_card:
-		print("_receive_opponent_recall: '%s' not found in zone %s" % [card_id, str(zone_key)])
-		return
-
-	# Mirror of the recall-clears-stun rule. The node is freed below, so the entry
-	# would otherwise linger until on_resolve_start purges the invalid reference.
-	StunManager.clear_stun(target_card)
-
-	if target_card.card_slot_is_in:
-		target_card.card_slot_is_in.card_in_slot = false
-	target_card.card_slot_is_in = null
-	board_reference.remove_card_from_zone(zone_key, target_card)
-	board_reference.reposition_cards_in_zone(zone_key)
-	target_card.queue_free()
-	print("_receive_opponent_recall: removed '%s' from zone %s" % [card_id, str(zone_key)])
-
-
-func apply_pending_opponent_swaps() -> void:
-	"""Move each queued opponent card to its destination slot and register the swap.
-	Called at the very start of SWAP_LANE phase, before execute_swaps() runs."""
-	for data in _pending_opponent_swaps:
-		var card_id: String = data["card_id"]
-		var from_zone := Vector2i(data["from_col"], 0)  # opponent is always row 0 from our view
-		var to_zone   := Vector2i(data["to_col"],   0)
-
-		# Find the opponent's card in from_zone
-		var card_to_swap = null
-		for c in board_reference.get_cards_in_zone(from_zone):
-			if is_instance_valid(c) and c.card_id == card_id:
-				card_to_swap = c
-				break
-
-		if not card_to_swap:
-			print("apply_pending_opponent_swaps: card '%s' not found in zone %s" % [card_id, str(from_zone)])
-			continue
-
-		var from_slot = card_to_swap.card_slot_is_in
-		if not from_slot:
-			print("apply_pending_opponent_swaps: card '%s' has no slot" % card_id)
-			continue
-
-		# Find a free slot in the destination zone
-		var dest_slot = null
-		for slot in board_reference.slots_by_zone.get(to_zone, []):
-			if not slot.card_in_slot:
-				dest_slot = slot
-				break
-
-		if not dest_slot:
-			print("apply_pending_opponent_swaps: no free slot in zone %s for '%s'" % [str(to_zone), card_id])
-			continue
-
-		# Move card to destination so execute_swaps() can snap it back then tween forward
-		board_reference.remove_card_from_zone(from_zone, card_to_swap)
-		from_slot.card_in_slot = false
-		card_to_swap.card_slot_is_in = dest_slot
-		dest_slot.card_in_slot = true
-		board_reference.add_card_to_zone(to_zone, card_to_swap)
-		card_to_swap.position = dest_slot.position
-
-		# Register so execute_swaps() includes this card
-		SwapLaneManager.register_swap(card_to_swap, from_zone, from_slot, to_zone, dest_slot, 0)
-		print("Opponent swap applied: '%s' zone %s → zone %s" % [card_id, str(from_zone), str(to_zone)])
-
-	_pending_opponent_swaps.clear()
 
 
 func _spawn_pending_opponent_cards() -> void:
@@ -1518,7 +1303,9 @@ func _spawn_pending_opponent_cards() -> void:
 func get_beheld_cards(player_id: int) -> Array:
 	"""Return all cards a player 'beholds' — cards in their hand + on the board.
 	Behold includes unresolved cards (face-down on board).
-	For the opponent, also includes synced hand card IDs (as BeheldCardProxy objects)."""
+	Only cards this peer actually has a node for are returned: the opponent's hand used
+	to arrive as a synced id list, which was one of the hidden-info leaks M5a removes.
+	Beholding an opponent card now means the card is on the board."""
 	var result: Array = []
 	var seen: Dictionary = {}  # card instance -> true, to avoid duplicates
 
@@ -1549,13 +1336,6 @@ func get_beheld_cards(player_id: int) -> Array:
 			result.append(child)
 			seen[child] = true
 
-	# Opponent hand cards (synced via RPC, don't exist as scene nodes on this client)
-	if player_id != current_player_id and opponent_hand_card_ids.size() > 0:
-		for id in opponent_hand_card_ids:
-			var proxy = BeheldCardProxy.new()
-			proxy.card_id = id
-			proxy.owner_player_id = player_id
-			result.append(proxy)
 
 	return result
 
@@ -1592,30 +1372,3 @@ func check_level_ups_after_abilities() -> void:
 # recalculate_auras() and individual _apply_aura_* methods have moved to AuraSystem.
 # CardManager calls _notify_zone_power_changed() → AuraSystem.recalculate_auras().
 
-
-func _is_online() -> bool:
-	if network_manager_reference and network_manager_reference.has_method("is_online"):
-		return network_manager_reference.is_online()
-	return false
-
-
-# ---- Opponent hand sync (for behold) ----
-
-func sync_hand_data() -> void:
-	"""Send current hand card IDs to the opponent so their behold calculations
-	can include our hand cards. Called when ending a turn."""
-	var ids: Array = []
-	if player_hand_reference:
-		for card in player_hand_reference.player_hand:
-			if is_instance_valid(card):
-				ids.append(card.card_id)
-	if _is_online():
-		rpc("_receive_opponent_hand_ids", ids)
-		print("Synced hand data to opponent: %d cards %s" % [ids.size(), str(ids)])
-
-
-@rpc("any_peer", "reliable")
-func _receive_opponent_hand_ids(card_ids: Array) -> void:
-	"""Receive opponent's hand card IDs for behold calculations."""
-	opponent_hand_card_ids = card_ids
-	print("Received opponent hand data: %d cards %s" % [card_ids.size(), str(card_ids)])

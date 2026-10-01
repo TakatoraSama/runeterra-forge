@@ -153,12 +153,8 @@ func _perform_level_up(new_card_id: String) -> void:
 	if not new_data:
 		print("_perform_level_up (landmark): unknown card id ", new_card_id)
 		return
-	var old_id = card_id
 	card_id = new_card_id
 	CardDatabase.populate_card_visuals(self, new_data)
-	if _card_manager and _card_manager._is_online() \
-			and owner_player_id == _card_manager.current_player_id:
-		_card_manager.rpc("_receive_opponent_level_up", old_id, new_card_id)
 
 
 func play_discard_dissolve(duration: float = 0.8) -> void:

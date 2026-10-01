@@ -359,8 +359,8 @@ func _check_nasus_levelup() -> void:
 			continue
 		if card_data.get("Name", "") != "Nasus" or card_data.get("Level", 1) != 1:
 			continue
-		# Only trigger level-up for the local player's Nasus.
-		# The opponent's level-up is handled on their client and received via _receive_opponent_level_up RPC.
+		# Only trigger level-up for the local player's Nasus; the opponent's level-up
+		# happens on their own side.
 		if card.owner_player_id != cm.current_player_id:
 			continue
 
@@ -577,8 +577,8 @@ func _check_rumble_levelup() -> void:
 			continue
 		if card_data.get("Name", "") != "Rumble" or card_data.get("Level", 1) != 1:
 			continue
-		# Only trigger level-up for the local player's Rumble.
-		# The opponent's level-up is handled on their client and received via _receive_opponent_level_up RPC.
+		# Only trigger level-up for the local player's Rumble; the opponent's level-up
+		# happens on their own side.
 		if card.owner_player_id != cm.current_player_id:
 			continue
 
@@ -747,7 +747,7 @@ func _check_janna_levelup() -> void:
 			continue
 		var owner_id: int = janna_card.owner_player_id
 		if owner_id != cm.current_player_id:
-			continue  # opponent's Janna levels up via _receive_opponent_level_up RPC on their client
+			continue  # opponent's Janna levels up on their own side
 		var draw_threshold: int = int(janna_data.get("BalanceValues", {}).get("draw_threshold", 12))
 		var count := 0
 		for entry in cm.drawn_cards:

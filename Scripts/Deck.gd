@@ -94,8 +94,8 @@ func trigger_game_start_abilities() -> void:
 			await AbilityResolver.execute_game_start_ability_for_deck(entry["id"], card_data, owner_player_id)
 
 
-# _execute_game_start_ability, _game_start_summon_sun_disc, _receive_opponent_game_start_summon,
-# and _is_online have moved to AbilityResolver.gd.
+# _execute_game_start_ability and _game_start_summon_sun_disc have moved to
+# AbilityResolver.gd.
 
 
 
