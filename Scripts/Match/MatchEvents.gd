@@ -11,6 +11,9 @@ class_name MatchEvents
 const TURN_STARTED := &"turn_started"				# {turn}
 const PHASE_CHANGED := &"phase_changed"			# {game_phase, round_phase, turn}
 const MANA_CHANGED := &"mana_changed"				# {player, current, max}
+const TURN_ENDED := &"turn_ended"				# {player} - that player ended their turn (public)
+const PLAY_OPENED := &"play_opened"				# {turn} - PLAY is open for `turn` (session layer only)
+const SESSION_ENDED := &"session_ended"			# {reason: String}
 const PRIORITY_CHANGED := &"priority_changed"		# {player}
 const LANE_ASSIGNED := &"lane_assigned"			# {lane_ids: Array}
 const LANE_REVEALED := &"lane_revealed"			# {col, lane_id}
@@ -62,6 +65,14 @@ static func mana_changed(player: int, current: int, max: int) -> Dictionary:
 static func priority_changed(player: int) -> Dictionary:
 	"""Turn priority moved to `player`."""
 	return {"type": PRIORITY_CHANGED, "player": player}
+
+
+
+static func turn_ended(player: int) -> Dictionary:
+	"""`player` ended their turn. Public to both viewers: each side needs it to
+	grey out its own End Turn button while the round waits for the other player.
+	Emitted by MatchRules._end_turn before _resolve_round, never by the presenter."""
+	return {"type": TURN_ENDED, "player": player}
 
 
 static func lane_assigned(lane_ids: Array) -> Dictionary:
@@ -117,7 +128,11 @@ static func play_undone(player: int, instance_ids: Array, hand_after: Array = []
 static func intent_rejected(player: int, intent_type: String, reason: String, instance_id: int = -1) -> Dictionary:
 	"""An intent from `player` was refused because of `reason`. `instance_id` is the card
 	the intent was about, or -1 for intents that name none (end_turn, undo), so a
-	presenter can send that card home instead of only showing the reason."""
+	presenter can send that card home instead of only showing the reason.
+	PLANNED, deliberately NOT done here because it changes behaviour: this event will
+	gain a "private_to" key equal to `player` so a refusal reaches the sender alone.
+	redact_for() already drops any event whose private_to is not the viewer, so the
+	change is only made at the emission sites (M5a Group A)."""
 	return {
 		"type": INTENT_REJECTED,
 		"player": player,
@@ -150,9 +165,14 @@ static func card_swapped(player: int, instance_id: int, from_col: int, to_col: i
 	}
 
 
-static func card_revealed(player: int, instance_id: int, card_id: String, col: int, slot: int) -> Dictionary:
-	"""A previously hidden card became public at resolve time."""
-	return {
+static func card_revealed(player: int, instance_id: int, card_id: String, col: int, slot: int, power: int = -1, cost: int = -1, keywords: Array = []) -> Dictionary:
+	"""A previously hidden card became public at resolve time.
+	`power`, `cost` and `keywords` carry the card's FINAL values, so a viewer shows the
+	real numbers instead of reconstructing them from modifiers it never saw. They are
+	OPTIONAL and OMITTED from the dict at their sentinels (-1 / -1 / []): every existing
+	caller keeps producing the exact same event, so a consumer must read them with a
+	default (event.get("power", -1)) and must not assume the key is present."""
+	var event: Dictionary = {
 		"type": CARD_REVEALED,
 		"player": player,
 		"instance_id": instance_id,
@@ -160,6 +180,13 @@ static func card_revealed(player: int, instance_id: int, card_id: String, col: i
 		"col": col,
 		"slot": slot,
 	}
+	if power >= 0:
+		event["power"] = power
+	if cost >= 0:
+		event["cost"] = cost
+	if not keywords.is_empty():
+		event["keywords"] = keywords
+	return event
 
 
 static func power_changed(instance_id: int, delta: int, new_power: int) -> Dictionary:
@@ -207,9 +234,11 @@ static func card_recalled(player: int, instance_id: int) -> Dictionary:
 	return {"type": CARD_RECALLED, "player": player, "instance_id": instance_id}
 
 
-static func card_summoned(player: int, instance_id: int, card_id: String, col: int, slot: int) -> Dictionary:
-	"""An effect summoned card `instance_id` straight onto the board."""
-	return {
+static func card_summoned(player: int, instance_id: int, card_id: String, col: int, slot: int, power: int = -1, cost: int = -1, keywords: Array = []) -> Dictionary:
+	"""An effect summoned card `instance_id` straight onto the board.
+	`power`, `cost` and `keywords` carry the summoned card's FINAL values and are
+	omitted from the dict unless given, exactly as in card_revealed()."""
+	var event: Dictionary = {
 		"type": CARD_SUMMONED,
 		"player": player,
 		"instance_id": instance_id,
@@ -217,6 +246,13 @@ static func card_summoned(player: int, instance_id: int, card_id: String, col: i
 		"col": col,
 		"slot": slot,
 	}
+	if power >= 0:
+		event["power"] = power
+	if cost >= 0:
+		event["cost"] = cost
+	if not keywords.is_empty():
+		event["keywords"] = keywords
+	return event
 
 
 static func card_leveled_up(instance_id: int, old_card_id: String, new_card_id: String, silent: bool = false) -> Dictionary:
@@ -266,6 +302,24 @@ static func resolve_started(plays: Array) -> Dictionary:
 	{player, instance_id, col, slot}, with no card_id: everyone sees the board, the
 	card identities stay secret until they are revealed one by one."""
 	return {"type": RESOLVE_STARTED, "plays": plays}
+
+
+static func play_opened(turn: int) -> Dictionary:
+	"""PLAY is open for turn `turn` and both players may act. The rules engine
+	emits nothing for the turn of the player who did not end it, and a session may
+	hold a submit back until every viewer has acked the previous batch, so the
+	opening of a PLAY phase is announced by the SESSION layer (MatchHost), never
+	by MatchRules and never for the first turn of a match.
+	This is the gate the presenter's is_play_phase() waits for."""
+	return {"type": PLAY_OPENED, "turn": turn}
+
+
+static func session_ended(reason: String) -> Dictionary:
+	"""The session is over for a reason the rules do not own: a peer disconnected,
+	the opponent left, the join handshake was refused. `reason` is a REASON_TEXT
+	key of MatchPresenter ("not_ready", "opponent_left", "disconnected", ...).
+	Informational only: GAME_ENDED remains the match result."""
+	return {"type": SESSION_ENDED, "reason": reason}
 
 
 static func redact_for(event: Dictionary, viewer: int) -> Variant:

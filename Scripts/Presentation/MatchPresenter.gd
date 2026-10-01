@@ -300,6 +300,71 @@ func verify(snapshot: Dictionary) -> Array[String]:
 
 
 # ----------------------------
+# View model queries (M5a) — read by MatchController in every mode
+# ----------------------------
+#
+# The guest holds NO MatchState, so is_play_phase() and can_undo() cannot be answered
+# from the controller's engine in GUEST mode. They are answered from THIS view model
+# instead, which is why these live here. Group B fills in the parts that need new
+# tracking (ended_turn per player, the play_opened turn, the local undo count); the
+# ones that are already exactly true of the current model are implemented.
+
+## True while the local player may act, as the VIEW sees it:
+##   the presenter is idle, the round is in TURN_LOOP / PLAY, play_opened has been
+##   received for this turn, the local player has not ended the turn, no end_turn has
+##   been sent for it yet, and the session is still alive.
+## STUB: needs the play_opened / ended_turn tracking Group B adds.
+func local_can_act() -> bool:
+	push_error("MatchPresenter: not implemented (M5a Group B)")
+	return false
+
+
+## How many of the local player's plays this turn can still be undone. STUB: needs the
+## undo_count the snapshot and play_undone events will carry (M5a Group A / B).
+func local_undo_count() -> int:
+	push_error("MatchPresenter: not implemented (M5a Group B)")
+	return 0
+
+
+## The turn the view is showing, from the last turn_started / phase_changed event.
+func view_turn() -> int:
+	return _turn
+
+
+## True while the view is in the PLAY phase of a running turn. This is the PHASE only:
+## it says nothing about whether the local player may act (local_can_act) or about
+## whether a guest's peer has acked.
+func view_in_play() -> bool:
+	return _game_phase == MatchState.GamePhase.TURN_LOOP \
+		and _round_phase == MatchState.RoundPhase.PLAY
+
+
+## True once the view has seen game_ended. Unlike the controller's is_match_over() this
+## needs no MatchState, so the guest can answer it from its own view.
+func is_match_over() -> bool:
+	return _game_phase == MatchState.GamePhase.GAME_END
+
+
+## True when the local player may start dragging card `instance_id` to another column:
+## it is an own resolved Elusive card on the board, not stunned, with no pending swap,
+## and the target column is different. This is the VIEW-side gate CardManager's swap
+## check will use instead of reading the controller's state (which the guest lacks).
+## STUB: needs the Elusive / stun / pending-swap view state Group B completes.
+func can_start_swap(instance_id: int) -> bool:
+	push_error("MatchPresenter: not implemented (M5a Group B)")
+	return false
+
+
+## Shows the session-ended overlay: `message` is the human text ("Opponent
+## disconnected", "Opponent left"), `match_over` says whether the finished result must
+## stay visible underneath (true when the match had already reached GAME_END).
+## Back to lobby on the overlay calls MatchController.leave_to_lobby().
+## STUB: no overlay scene exists yet (M5a Group B).
+func show_session_ended(message: String, match_over: bool) -> void:
+	push_error("MatchPresenter: not implemented (M5a Group B)")
+
+
+# ----------------------------
 # Queue processing
 # ----------------------------
 

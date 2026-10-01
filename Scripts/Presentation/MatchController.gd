@@ -22,6 +22,11 @@
 ## takes an engine-mode branch.
 class_name MatchController extends Node
 
+## Which session this controller drives. Player ids are ABSOLUTE: 0 = host, 1 = guest,
+## and local_player below follows from the mode (offline keeps the human at 1 and the
+## bot at 0, as it always has).
+enum Mode {NONE, OFFLINE, HOST, GUEST}
+
 ## The presenter finished its queue: the view is up to date with the engine.
 signal view_idle
 ## The match is over. `winner` is -1 for a tie.
@@ -33,6 +38,12 @@ const BOT_MAX_STEPS := 512
 
 ## The seed of the match in progress (-1 until start_offline, then the real seed).
 var match_seed: int = -1
+
+## The session this controller drives: NONE until start_offline / start_host /
+## start_guest sets it. Everything mode-dependent keys off this — which viewer events
+## are redacted for, whether the local player may submit, and whether this controller
+## owns a MatchState at all (the guest does not).
+var mode: Mode = Mode.NONE
 
 var rules: MatchRules
 var state: MatchState
@@ -87,6 +98,7 @@ func is_started() -> bool:
 ## player 1's. A seed below 0 means "pick one": --seed=N when it was passed on the
 ## command line, otherwise a random one, so a run without --seed is not repeatable.
 func start_offline(human_deck: Array, bot_deck: Array, seed: int = -1) -> void:
+	mode = Mode.OFFLINE
 	var chosen: int = seed
 	if chosen < 0:
 		chosen = _dev_seed
@@ -218,6 +230,76 @@ func _run_bot() -> void:
 
 
 # ----------------------------
+# Session (M5a HOST / GUEST) — STUB, implemented by M5a Group B
+# ----------------------------
+
+## Starts hosting: this peer is absolute player 0 and owns the engine. `net` is the
+## MatchNet node, used only as the delivery transport for the guest's viewer.
+## `host_deck` / `guest_deck` are 12 card ids each (guest_deck already validated by
+## MatchHost.check_hello). `want_snapshots` adds the guest to the snapshot viewers.
+## `seed` below 0 means "pick one": --seed=N when passed, otherwise random. The seed
+## and host_deck never leave the host.
+func start_host(net: Node, host_deck: Array, guest_deck: Array, want_snapshots: bool, seed: int = -1) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## Starts as the guest: absolute player 1, NO MatchState and no MatchRules — this peer
+## only sends intents and animates what `net` receives. Every view question
+## (is_play_phase, can_undo) must therefore be answered from the PRESENTER's view model
+## in this mode, never from `state`.
+func start_guest(net: Node) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## A guest's intent arrived (via MatchNet). HOST mode: hands it to MatchHost.submit(1,
+## intent), which redacts and routes the answer. GUEST mode: a host must never send an
+## intent, so this is dropped.
+func on_remote_intent(intent: Dictionary) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## The guest finished animating turn `turn` (via MatchNet). HOST mode: hands it to
+## MatchHost.presentation_done(1, turn), which releases the held batch once every
+## required viewer has acked. GUEST mode: dropped (the host drives the acks).
+func on_remote_presentation_done(turn: int) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## A host's event batch arrived (via MatchNet). GUEST mode: hands the batch to the
+## presenter as-is — it was already redacted for us on the host. HOST mode: dropped.
+func on_remote_events(events: Array) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## A host's full snapshot arrived (via MatchNet). GUEST mode: the first one (seq 0)
+## builds the view with presenter.setup(snapshot, 1, self); later ones are kept as the
+## reference --verify-view compares against. HOST mode: dropped.
+func on_remote_snapshot(snapshot: Dictionary) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## Ends the session for a reason the rules do not own. `reason` is a REASON_TEXT key of
+## MatchPresenter ("disconnected", "opponent_left", "not_ready", ...). Shows the
+## session-ended overlay with match_over = is_match_over(), so a finished result stays
+## visible under the message. Idempotent.
+func end_session(reason: String) -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+
+## True once the match is finished. Implemented here for offline and HOST (both own a
+## MatchState). GUEST has no state, so it is answered from the presenter's view model
+## — which is why the --quit-on-end check asks the controller on both peers.
+func is_match_over() -> bool:
+	return state != null and state.game_phase == MatchState.GamePhase.GAME_END
+
+
+## Leaves the match and returns to the lobby: closes the peer first (so no late packet
+## can reach the old session), then reloads the current scene. Called from the
+## session-ended overlay's Back to lobby button, and after GAME_END in HOST / GUEST.
+func leave_to_lobby() -> void:
+	push_error("MatchController: not implemented (M5a Group B)")
+
+# ----------------------------
 # Dev flags (debug builds only)
 # ----------------------------
 
@@ -284,37 +366,28 @@ func _presenter_idle() -> bool:
 
 
 ## Card ids for the human's offline deck: the active saved deck when it is complete and
-## every id is known, otherwise Deck.DEFAULT_DECK — the same rule as Deck._build_player_deck.
+## every id is known, otherwise MatchDecks.DEFAULT_DECK_IDS — the same rule as
+## Deck._build_player_deck. MatchDecks owns the rule (and DECK_SIZE); this only reads
+## the saved ids out of the DeckManager autoload, because a guest's deck arrives the
+## same way through the join handshake.
 static func human_deck_ids() -> Array[String]:
 	var saved: Array = []
 	var dm := _autoload(&"DeckManager")
 	if dm != null and dm.has_method("get_active_deck"):
 		for raw: Variant in dm.call("get_active_deck"):
-			var card_id: String = str(raw)
-			if not CardDatabase.CARDS.has(card_id):
-				continue
-			saved.append(card_id)
-	# A partial deck would start the match short and immediately Deep, so it is skipped.
-	if saved.size() == int(_script_constant(dm, "MAX_DECK_SIZE", 12)):
-		return saved
-	return default_deck_ids()
+			saved.append(raw)
+	return MatchDecks.sanitize(saved)
 
 
-## Deck.DEFAULT_DECK's card ids, in deck order.
+## MatchDecks.DEFAULT_DECK_IDS, in deck order (a copy: the caller owns the result).
 static func default_deck_ids() -> Array[String]:
-	var ids: Array[String] = []
-	for entry: Variant in _script_constant(load("res://Scripts/Deck.gd"), "DEFAULT_DECK", []):
-		ids.append(str((entry as Dictionary)["id"]))
-	return ids
+	return MatchDecks.DEFAULT_DECK_IDS.duplicate()
 
 
-## BotManager.BOT_DECK's card ids: the offline AI's deck (BotManager is only read here,
-## its decisions come from MatchBot).
+## MatchDecks.BOT_DECK_IDS: the offline AI's deck (the decisions come from MatchBot,
+## the list is data).
 static func bot_deck_ids() -> Array[String]:
-	var ids: Array[String] = []
-	for card_id: Variant in _script_constant(load("res://Scripts/BotManager.gd"), "BOT_DECK", []):
-		ids.append(str(card_id))
-	return ids
+	return MatchDecks.BOT_DECK_IDS.duplicate()
 
 
 ## The autoload node of that name, or null outside a running tree.
@@ -324,19 +397,3 @@ static func _autoload(node_name: StringName) -> Node:
 		return null
 	return (loop as SceneTree).root.get_node_or_null(NodePath(node_name))
 
-
-## One constant of `source`: either a Script, or a Node whose script holds it.
-##
-## The old deck tables are read through load() rather than preload(): Deck.gd and
-## BotManager.gd reference autoload singletons of their own, and a preload here would
-## tie this script's compilation to that cycle. Nothing below runs game logic — a
-## constant table is data, exactly like CardDatabase.CARDS.
-static func _script_constant(source: Variant, constant_name: StringName, fallback: Variant) -> Variant:
-	var script: Script = source as Script
-	if script == null:
-		var node := source as Node
-		if node != null:
-			script = node.get_script() as Script
-	if script == null:
-		return fallback
-	return script.get_script_constant_map().get(constant_name, fallback)
