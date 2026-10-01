@@ -2,3 +2,6 @@
 .godot/
 /android/
 *.tmp
+
+# Per-machine settings for the headless test scripts (see tools/local.env.example).
+/tools/local.env

@@ -7,15 +7,23 @@
 # ([VIEW] ok / [VIEW-MISMATCH] …), so a whole match is played out and checked.
 #
 # Usage (from the repo root):
-#   tools/offline_selftest.sh [SEED ...]    # defaults to 1 2 3 42 777 2024
+#   tools/offline_selftest.sh [SEED ...]     # positional args are SEEDS, not paths;
+#                                            # defaults to 1 2 3 42 777 2024
+#                                            # logs always go to $OUT: <OUT>/seed_<SEED>.log
+#   tools/offline_selftest.sh 1 2            # -> $OUT/seed_1.log, $OUT/seed_2.log
 #
 # Environment:
-#   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64)
-#   OUT   log directory (default /tmp/offline_selftest)
+#   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64;
+#         override in tools/local.env — see tools/local.env.example)
+#   OUT   log directory (default /tmp/offline_selftest) — the only place to put logs;
+#         there is no per-run output directory argument
 #
 # Exits 0 on PASS, 1 on FAIL.
 
 set -uo pipefail
+
+# tools/local.env, GNU timeout on Git Bash, fu_require_godot.
+. "$(dirname -- "$0")/_env.sh"
 
 G47="${G47:-/home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64}"
 OUT="${OUT:-/tmp/offline_selftest}"
@@ -24,10 +32,8 @@ if [ "${#SEEDS[@]}" -eq 0 ]; then
 	SEEDS=(1 2 3 42 777 2024)
 fi
 
-if [ ! -x "$G47" ]; then
-	echo "FAIL: Godot binary not found or not executable: $G47"
-	exit 1
-fi
+fu_require_godot
+
 if [ ! -f project.godot ]; then
 	echo "FAIL: run this from the repo root (no project.godot here)"
 	exit 1

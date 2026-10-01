@@ -10,20 +10,20 @@
 #   tools/run_tests.sh [name_filter]     # only run tests whose path contains name_filter
 #
 # Environment:
-#   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64)
+#   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64;
+#         override in tools/local.env — see tools/local.env.example)
 #   OUT   log directory  (default /tmp)
-#
-# Exits 0 on PASS, 1 on FAIL.
 
 set -uo pipefail
+
+# tools/local.env, GNU timeout on Git Bash, fu_require_godot.
+. "$(dirname -- "$0")/_env.sh"
 
 G47="${G47:-/home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64}"
 OUT="${OUT:-/tmp}"
 
-if [ ! -x "$G47" ]; then
-	echo "FAIL: Godot binary not found or not executable: $G47"
-	exit 1
-fi
+fu_require_godot
+
 if [ ! -f project.godot ]; then
 	echo "FAIL: run this from the repo root (no project.godot here)"
 	exit 1

@@ -8,12 +8,21 @@
 # Usage (from the repo root):
 #   tools/lan_selftest.sh [OUT_DIR]      # OUT_DIR defaults to /tmp/lan_selftest
 #
+# Environment:
+#   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64;
+#         override in tools/local.env — see tools/local.env.example)
+#
 # Exits 0 on PASS, 1 on FAIL.
 
 set -uo pipefail
 
+# tools/local.env, GNU timeout on Git Bash, fu_require_godot.
+. "$(dirname -- "$0")/_env.sh"
+
 G47="${G47:-/home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64}"
 OUT="${1:-/tmp/lan_selftest}"
+fu_require_godot
+
 mkdir -p "$OUT"
 
 echo "== lan_selftest =="
