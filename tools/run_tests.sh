@@ -13,6 +13,8 @@
 #   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64;
 #         override in tools/local.env — see tools/local.env.example)
 #   OUT   log directory  (default /tmp)
+#
+# Exits 0 on PASS, 1 on FAIL.
 
 set -uo pipefail
 
