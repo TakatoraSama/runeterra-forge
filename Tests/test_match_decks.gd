@@ -190,7 +190,6 @@ func test_match_net_declares_the_five_rpcs_the_senders_and_the_signals() -> void
 		assert_true(signals.has(signal_name), "MatchNet.%s exists" % signal_name)
 
 
-
 # ----------------------------
 # Helpers
 # ----------------------------

@@ -259,8 +259,9 @@ func on_remote_intent(intent: Dictionary) -> void:
 
 
 ## The guest finished animating turn `turn` (via MatchNet). HOST mode: hands it to
-## MatchHost.presentation_done(1, turn), which releases the held batch once every
-## required viewer has acked. GUEST mode: dropped (the host drives the acks).
+## MatchHost.presentation_done(1, turn), which counts the ack and releases the pending
+## play_opened once every id in acks_required has acked. GUEST mode: dropped (the host
+## drives the acks).
 func on_remote_presentation_done(turn: int) -> void:
 	push_error("MatchController: not implemented (M5a Group B)")
 
@@ -298,6 +299,7 @@ func is_match_over() -> bool:
 ## session-ended overlay's Back to lobby button, and after GAME_END in HOST / GUEST.
 func leave_to_lobby() -> void:
 	push_error("MatchController: not implemented (M5a Group B)")
+
 
 # ----------------------------
 # Dev flags (debug builds only)

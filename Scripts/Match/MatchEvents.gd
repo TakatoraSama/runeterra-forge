@@ -67,7 +67,6 @@ static func priority_changed(player: int) -> Dictionary:
 	return {"type": PRIORITY_CHANGED, "player": player}
 
 
-
 static func turn_ended(player: int) -> Dictionary:
 	"""`player` ended their turn. Public to both viewers: each side needs it to
 	grey out its own End Turn button while the round waits for the other player.
@@ -306,11 +305,15 @@ static func resolve_started(plays: Array) -> Dictionary:
 
 static func play_opened(turn: int) -> Dictionary:
 	"""PLAY is open for turn `turn` and both players may act. The rules engine
-	emits nothing for the turn of the player who did not end it, and a session may
-	hold a submit back until every viewer has acked the previous batch, so the
-	opening of a PLAY phase is announced by the SESSION layer (MatchHost), never
-	by MatchRules and never for the first turn of a match.
-	This is the gate the presenter's is_play_phase() waits for."""
+	emits nothing for the turn of the player who did not end it, so the opening of a
+	PLAY phase is announced by the SESSION layer (MatchHost), never by MatchRules.
+	It covers the first turn too: start_match opens turn 1 through the same gate, so
+	on LAN both peers finish the opening draws before either may act.
+	This is the gate the presenter's is_play_phase() waits for, and the ONE event
+	MatchHost holds back: every other batch is delivered immediately, while
+	play_opened(T) waits until every player in acks_required has acked turn T-1 (or
+	ack_timeout(T) fires). Until it arrives the session refuses input with
+	not_ready. Offline (acks_required empty) appends it to the same batch."""
 	return {"type": PLAY_OPENED, "turn": turn}
 
 

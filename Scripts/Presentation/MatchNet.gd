@@ -22,8 +22,11 @@ class_name MatchNet extends Node
 ## echoes what the guest asked for. Emitted on the HOST only, once per session.
 signal guest_ready(deck: Array, want_snapshots: bool)
 ## The host refused the handshake ("bad_protocol", "second_guest", "bad_deck"). Emitted
-## on the HOST; the peer is disconnected shortly after, so the guest's own
-## session_ended(server_disconnected) is what it actually shows.
+## on the HOST only. The GUEST is told through the normal event stream: the host puts a
+## session_ended(reason) event into a receive_events batch addressed to that guest,
+## which reaches the guest as MatchEvents.SESSION_ENDED, and then disconnects the peer
+## about 2 s later. The guest therefore shows its own session-ended overlay and never
+## depends on this signal.
 signal session_refused(reason: String)
 ## The session ended for a reason the rules do not own: "Opponent disconnected" when a
 ## peer drops, "Opponent left" once the match is over. Emitted on BOTH peers.
@@ -62,8 +65,8 @@ func send_intent(intent: Dictionary) -> void:
 
 
 ## Guest -> host: the guest's presenter has animated the batch for `turn` to the end.
-## The host releases the next play_opened once every viewer in acks_required has acked,
-## or when ack_timeout(turn) fires.
+## The host counts the ack; it releases play_opened(turn) once every id in
+## acks_required has acked that turn, or when ack_timeout(turn) fires.
 func send_presentation_done(turn: int) -> void:
 	push_error("MatchNet: not implemented (M5a Group C)")
 
