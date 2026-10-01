@@ -182,7 +182,14 @@ func _connect_quit_on_end(controller: Node) -> void:
 		presenter = controller.get_node_or_null(^"/root/Main/MatchPresenter")
 	if presenter == null or not presenter.has_signal("idle"):
 		return
-	presenter.idle.connect(_on_dev_presenter_idle.bind(controller))
+	# This is called from more than one place (building the session nodes and answering
+	# the handshake), so the Callable is kept and compared before connecting again.
+	# Comparing a fresh `bind()` result would not do: every bind() is a new object.
+	var bound := _on_dev_presenter_idle.bind(controller)
+	if _quit_on_end_callable.is_valid() and _quit_on_end_callable == bound:
+		return
+	_quit_on_end_callable = bound
+	presenter.idle.connect(bound)
 
 
 func _on_dev_presenter_idle(controller: Node) -> void:
@@ -220,9 +227,16 @@ func _on_guest_connected() -> void:
 ## HOST: the guest's hello passed MatchHost.check_hello (the deck is validated, the
 ## protocol matches and there is no second guest), so the match can start. The host's
 ## own deck and the seed are read here and stay here.
+##
+## The session nodes are built HERE, not at Host time: the host needs the guest's deck
+## before it can start, and start_host delivers the opening snapshot to its own
+## presenter inside that call — so the controller and the presenter both have to exist
+## before it runs.
 func _on_guest_ready(guest_deck: Array, want_snapshots: bool) -> void:
 	status_label.text = "Opponent connected! Starting game..."
+	_build_session_nodes()
 	_connect_quit_on_end(session_controller)
+	match_net.controller = session_controller
 	panel.visible = false
 	session_controller.call("start_host",
 		match_net,
@@ -323,6 +337,10 @@ var _dev_quit_on_end: bool = false
 var _dev_seed: int = -1
 var _dev_verify_view: bool = false
 var _dev_join_attempts: int = 0
+
+## The Callable currently connected to the presenter's `idle` for --quit-on-end, so a
+## second _connect_quit_on_end() call is a no-op instead of a duplicate connection.
+var _quit_on_end_callable: Callable = Callable()
 
 
 func _parse_dev_args() -> void:
