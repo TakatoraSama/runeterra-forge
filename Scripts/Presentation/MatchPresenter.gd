@@ -446,6 +446,36 @@ func _entry_has_keyword(entry: Dictionary, keyword: String) -> bool:
 		return true
 	return (entry.get("keywords", []) as Array).has(keyword)
 
+
+## The single rule for whether a LOCAL-VIEW card node may be clicked: its Area2D is
+## enabled only while the card is somewhere the player can pick it up — in our own
+## hand, or on our own board when it is an Elusive unit (the one thing on the board
+## CardManager.start_drag can do something with, and what can_start_swap gates).
+##
+## Every other board card is display-only: a non-Elusive unit has no legal drag off
+## its lane and an opponent's card is not ours to touch at all. Disabling the shape
+## is what makes that true in the INPUT path rather than in a check inside
+## start_drag: InputManager.raycast_at_cursor only accepts collision_mask == 1 hits,
+## so a card without one is never picked and the drag never begins.
+func _refresh_collider(id: int) -> void:
+	var entry: Dictionary = _entries.get(id, {})
+	if entry.is_empty():
+		return
+	var node := node_for(id)
+	if node == null:
+		return
+	var enabled := false
+	match int(entry.get("location", ViewLocation.GONE)):
+		ViewLocation.HAND:
+			enabled = int(entry.get("owner", -1)) == local_player
+		ViewLocation.BOARD:
+			enabled = int(entry.get("owner", -1)) == local_player \
+					and _entry_has_keyword(entry, "Elusive")
+		_:
+			enabled = false
+	_set_collider(node, enabled)
+
+
 ## Shows the session-ended overlay: `message` is the human text ("Opponent
 ## disconnected", "Opponent left"), `match_over` says whether the finished result must
 ## stay visible underneath (true when the match had already reached GAME_END).
@@ -961,7 +991,7 @@ func _on_card_played(event: Dictionary) -> void:
 	node.is_in_hand = false
 	node.hide_glow()
 	node.z_index = 0
-	_set_collider(node, not _card_data_keywords(str(entry["card_id"])).has("Elusive"))
+	_refresh_collider(id)
 	await get_tree().process_frame
 
 
@@ -979,7 +1009,7 @@ func _on_play_undone(event: Dictionary) -> void:
 		if entry.is_empty():
 			continue
 		var node: Variant = entry.get("node", null)
-		_remove_from_zone_model(id)
+		_move_board_card_to_hand_view(id, node)
 		_swap_preview.erase(id)
 		entry["location"] = ViewLocation.HAND
 		entry["resolved"] = false
@@ -988,7 +1018,7 @@ func _on_play_undone(event: Dictionary) -> void:
 			node.is_in_hand = true
 			node.scale = Vector2(HAND_CARD_SCALE, HAND_CARD_SCALE)
 			node.z_index = HAND_CARD_Z
-			_set_collider(node, true)
+			_refresh_collider(id)
 
 	var hand_after: Variant = event.get("hand_after", [])
 	_local_hand.clear()
@@ -1061,6 +1091,9 @@ func _on_card_swapped(event: Dictionary) -> void:
 	tween.tween_property(node, "position", destination, SWAP_DURATION)
 	await _race([tween.finished], SWAP_DURATION + 1.0)
 	node.z_index = 0
+	# The card kept its Elusive on the way across, so the click area it needs is the one
+	# it had: re-derive it from the model rather than assume every earlier path ran.
+	_refresh_collider(id)
 
 
 func _erase_pending_swap(id: int) -> void:
@@ -1149,6 +1182,10 @@ func _on_card_revealed(event: Dictionary) -> void:
 	entry["resolved"] = true
 	entry["face_down"] = false
 	_apply_modifiers(entry)
+	# The reveal is where a card's real identity lands: its card_id and its final
+	# keyword list are only known from here, so this is the first moment Elusive is
+	# knowable for a card that sat face down.
+	_refresh_collider(id)
 	await _await_anim(node, &"card_flip_play", ANIMATION_LIMIT)
 	node.hide_card_back()
 	await get_tree().create_timer(CARD_PAUSE).timeout
@@ -1277,6 +1314,10 @@ func _on_keyword(event: Dictionary, added: bool) -> void:
 			node.add_runtime_keyword(keyword)
 	elif node.has_method("remove_runtime_keyword"):
 		node.remove_runtime_keyword(keyword)
+	# Elusive can arrive or leave at runtime (Janna's Quickdraw): the click area has to
+	# follow it, because a node whose collider is stale either cannot be dragged off its
+	# lane or offers a swap start that can_start_swap will refuse.
+	_refresh_collider(id)
 
 
 func _on_death_prevented(event: Dictionary) -> void:
@@ -1336,6 +1377,7 @@ func _on_card_summoned(event: Dictionary) -> void:
 	node.is_in_hand = false
 	node.hide_glow()
 	_apply_modifiers(entry)
+	_refresh_collider(id)
 
 
 func _on_card_leveled_up(event: Dictionary) -> void:
@@ -1371,6 +1413,9 @@ func _on_card_leveled_up(event: Dictionary) -> void:
 	# and Power to the new level's printed values; the modifiers have to go back on.
 	_refresh_keyword_display(node)
 	_apply_modifiers(entry)
+	# The new level prints its own keyword set (Janna1 -> Janna2 gains Elusive),
+	# so the click area has to be re-derived from the new card_id, not kept.
+	_refresh_collider(id)
 
 
 func _on_card_recalled(event: Dictionary) -> void:
@@ -1379,19 +1424,23 @@ func _on_card_recalled(event: Dictionary) -> void:
 	var entry: Dictionary = _entries.get(id, {})
 	if pid != local_player:
 		# Their client owns that hand, so the card just leaves our board.
-		#
 		# The zone must be captured BEFORE _remove_from_zone_model() clears the entry's col:
-		# read afterwards it is already -1, the sync below silently does nothing, and the
-		# recalled card's node stays registered in the board zone — a face-up ghost left
-		# behind for a card that went back to the opponent's hand.
+		# read afterwards it is already -1, the sync silently does nothing, and the recalled
+		# card's node stays registered in the board zone — a face-up ghost left behind for a
+		# card that went back to the opponent's hand. _move_board_card_to_hand_view is the
+		# shared cleanup and captures it in that order for us.
+		#
 		# Once the card is off the board and back in a hand we cannot see, the view can no
 		# longer vouch for what is public about it: it may be drawn, discarded, or played
 		# face-down again. Dropping the identity and the resolution flag keeps the model
 		# honest — a stale "Chip, resolved" would make verify report a card the engine has
 		# deliberately hidden, and would leak it face-up if it came back to the board.
-		var owner := int(entry.get("owner", pid))
-		var col := int(entry["col"])
-		_remove_from_zone_model(id)
+		#
+		# Clearing card_slot_is_in here is a no-op in practice: the node is released
+		# immediately below, so no drag can ever start from it. It goes through the shared
+		# helper rather than being special-cased so the zone bookkeeping exists in exactly
+		# one place.
+		_move_board_card_to_hand_view(id, entry.get("node", null))
 		_swap_preview.erase(id)
 		_release_node(id, entry.get("node", null))
 		entry["card_id"] = ""
@@ -1399,12 +1448,11 @@ func _on_card_recalled(event: Dictionary) -> void:
 		entry["face_down"] = false
 		entry["keywords"] = []
 		entry["location"] = ViewLocation.GONE
-		_sync_zone(col, owner)
 		return
 	if entry.is_empty():
 		return
 	var node := node_for(id)
-	_remove_from_zone_model(id)
+	_move_board_card_to_hand_view(id, node)
 	entry["location"] = ViewLocation.HAND
 	entry["resolved"] = false
 	entry["face_down"] = false
@@ -1414,7 +1462,7 @@ func _on_card_recalled(event: Dictionary) -> void:
 		_hand.remove_card_from_hand(node, false)
 	node.is_resolved = false
 	node.z_index = DRAG_Z
-	_set_collider(node, true)
+	_refresh_collider(id)
 	_local_hand.insert(0, id)
 	_sync_hand_nodes()
 	var scale_tween := node.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
@@ -1815,6 +1863,36 @@ func _remove_from_zone_model(id: int) -> void:
 		shifted["slot"] = index
 	entry["col"] = -1
 	entry["slot"] = -1
+
+
+## The shared board -> hand view cleanup for a card the engine took back off the board
+## (an undone play, our own card recalled by an ability): drop it from the model zone,
+## rebuild that zone so the slot it vacated is marked free again, and clear the node's
+## card_slot_is_in.
+##
+## The zone MUST be captured before _remove_from_zone_model, which clears entry["col"]:
+## read afterwards it is -1, _sync_zone silently does nothing, and the returned card stays
+## registered in Board.cards_by_zone with its slot still marked occupied — a ghost that
+## blocks the drop the next play makes into that lane.
+##
+## card_slot_is_in matters as much: CardManager._start_drag_engine reads it to decide
+## whether a click starts a board swap or a hand drag, so a node that went back to the
+## hand still pointing at a slot is still treated as a board card and can_start_swap
+## refuses it.
+## `node` is Variant, not Node, for the same reason _release_node's is: a caller can hand
+## over an entry whose node was freed earlier in this same batch, and a typed parameter
+## would raise at the call boundary BEFORE the is_instance_valid guard below could run.
+func _move_board_card_to_hand_view(id: int, node: Variant) -> void:
+	var entry: Dictionary = _entries.get(id, {})
+	if entry.is_empty():
+		return
+	var col := int(entry["col"])
+	var owner := int(entry["owner"])
+	_remove_from_zone_model(id)
+	if col >= MatchState.SPELL_COL:
+		_sync_zone(col, owner)
+	if node is Node and is_instance_valid(node):
+		node.card_slot_is_in = null
 
 
 ## Rebuilds one board zone from the model and lets the old repositioner lay the cards
