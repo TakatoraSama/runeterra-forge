@@ -8,12 +8,9 @@
 ## Board.reposition_cards_in_zone, the Card animations), so an engine-mode board looks
 ## exactly like an old-engine one.
 ##
-## It NEVER calls old game logic: no AbilityResolver, LevelUpManager, AuraSystem,
-## LaneManager, SwapLaneManager, StunManager, BotManager, no Deck.draw_card /
-## draw_specific_cards, no Board.create_lanes_from_ids, no Card._perform_level_up, no
-## CardManager.recall_card / discard_card_from_hand / create_card_in_hand /
-## resolve_played_cards / finish_drag and no GameManager mana or turn function. The engine is
-## the single source of truth and this file only ever reacts to MatchEvents.
+## It holds no game rules: the old node engine (and its autoloads) was deleted in Phase 3
+## M5b. The engine (Scripts/Match) is the single source of truth and this file only ever
+## reacts to MatchEvents.
 ##
 ## Perspective: the engine's player ids are ABSOLUTE (0 = host, 1 = guest) and its
 ## zones are keyed Vector2i(col, owner). The SCREEN has no absolute ids: the local
@@ -1846,7 +1843,16 @@ func _race(signal_list: Array, limit: float) -> void:
 		awaited.connect(one_shot, CONNECT_ONE_SHOT)
 	if done[0]:
 		return
-	await get_tree().create_timer(limit).timeout
+	# Poll every frame so a signal that fires mid-wait shortens the wait: the old
+	# `await create_timer(limit).timeout` always slept the full limit (up to ~1 s
+	# per animation). The budget is wall-clock scaled by Engine.time_scale, exactly
+	# like the timer it replaces (`--fast` = 8x), which fires in scaled time.
+	var start := Time.get_ticks_msec()
+	var budget := int(limit * 1000.0 / maxf(Engine.time_scale, 0.001))
+	while not done[0]:
+		if Time.get_ticks_msec() - start >= budget:
+			return
+		await get_tree().process_frame
 
 
 
@@ -2065,10 +2071,11 @@ func _sync_zone(col: int, owner: int) -> void:
 	_board.reposition_cards_in_zone(board_zone)
 
 
-## The six lane power labels, summed from the DISPLAY layout and resolved cards only, like
-## GameManager._get_zone_total_power. Display, not model: the number under a lane has to
-## agree with the cards that lane is showing, so a card queued to swap out stops counting
-## for its origin the moment it stops sitting there and counts for its destination instead.
+## The six lane power labels, summed from the DISPLAY layout and resolved cards only,
+## exactly like the old engine's zone power sum. Display, not model: the number under
+## a lane has to agree with the cards that lane is showing, so a card queued to swap
+## out stops counting for its origin the moment it stops sitting there and counts for
+## its destination instead.
 func _refresh_zone_power_texts() -> void:
 	if _board == null or not _board.has_method("update_zone_power_texts"):
 		return

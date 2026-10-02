@@ -7,7 +7,6 @@
 [ext_resource type="Script" uid="uid://ct2kwpasmmpkb" path="res://Scripts/Deck.gd" id="4_v1gob"]
 [ext_resource type="Texture2D" uid="uid://dyufxv8em17el" path="res://Assets/card_back.webp" id="5_v1gob"]
 [ext_resource type="Script" uid="uid://dihssh1j1l8k1" path="res://Scripts/InputManager.gd" id="6_jw32o"]
-[ext_resource type="Script" uid="uid://dio4mtjp1g1t1" path="res://Scripts/GameManager.gd" id="8_50glp"]
 [ext_resource type="Script" uid="uid://bjywwxmplwxyv" path="res://Scripts/NetworkManager.gd" id="9_netmgr"]
 [ext_resource type="PackedScene" path="res://Scenes/LobbyUI.tscn" id="10_lobby"]
 [ext_resource type="PackedScene" path="res://Scenes/SettingsUI.tscn" id="11_settings"]
@@ -74,9 +73,6 @@ offset_top = 860.0
 offset_right = 1845.0
 offset_bottom = 910.0
 text = "Undo Actions"
-
-[node name="GameManager" type="Node2D" parent="." unique_id=1734828372]
-script = ExtResource("8_50glp")
 
 [node name="Board" type="Node2D" parent="." unique_id=1975552919]
 script = ExtResource("2_jw32o")

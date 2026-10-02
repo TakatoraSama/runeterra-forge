@@ -13,9 +13,6 @@ var runtime_keywords: Array = []
 var aura_power_modifier: int = 0
 var _dissolve_mat: ShaderMaterial = null
 
-var _card_manager: Node = null
-var _game_manager: Node = null
-
 @onready var card_back: Node2D = $"CardBack"
 @onready var animation_player: AnimationPlayer = $"AnimationPlayer"
 
@@ -27,8 +24,6 @@ func _ready() -> void:
 	_set_card_back_hidden()
 	if animation_player:
 		animation_player.animation_finished.connect(_on_animation_finished)
-	_card_manager = get_node_or_null("/root/Main/CardManager")
-	_game_manager = get_node_or_null("/root/Main/GameManager")
 	var mat := ShaderMaterial.new()
 	mat.shader = _DISSOLVE_SHADER
 	mat.set_shader_parameter("dissolve_amount", 0.0)
@@ -111,50 +106,8 @@ func _on_area_2d_mouse_exited() -> void:
 	emit_signal("hovered_off", self)
 
 
-func on_summon() -> void:
-	await AbilityResolver.execute_play_ability(self)
-
-
-func on_round_start() -> bool:
-	return await AbilityResolver.execute_round_start_ability(self)
-
-
-func on_round_end() -> bool:
-	return await AbilityResolver.execute_round_end_ability(self)
-
-
-func on_game_end() -> bool:
-	return await AbilityResolver.execute_game_end_ability(self)
-
-
-func add_runtime_keyword(keyword_name: String) -> void:
-	if keyword_name in runtime_keywords:
-		return
-	runtime_keywords.append(keyword_name)
-	_refresh_keyword_display()
-
-
-func remove_runtime_keyword(keyword_name: String) -> void:
-	if keyword_name in runtime_keywords:
-		runtime_keywords.erase(keyword_name)
-		_refresh_keyword_display()
-
-
-func _refresh_keyword_display() -> void:
-	"""Rebuild keyword badges from static card data + runtime_keywords.
-	Delegates to CardDatabase.fill_keyword_container() so the sprite paths match
-	KeywordItem.tscn's nested HBoxContainer/SpriteMargin layout."""
-	var keyword_container = get_node_or_null("CardFront/TextContainer/KeywordContainer")
-	var all_keywords: Array = CardDatabase.CARDS.get(card_id, {}).get("Keyword", []) + runtime_keywords
-	CardDatabase.fill_keyword_container(keyword_container, all_keywords)
-
-func _perform_level_up(new_card_id: String) -> void:
-	var new_data = CardDatabase.CARDS.get(new_card_id)
-	if not new_data:
-		print("_perform_level_up (landmark): unknown card id ", new_card_id)
-		return
-	card_id = new_card_id
-	CardDatabase.populate_card_visuals(self, new_data)
+# Ability triggers and landmark level-up used to live on this view and were
+# removed: the Match engine owns abilities and level-ups now.
 
 
 func play_discard_dissolve(duration: float = 0.8) -> void:

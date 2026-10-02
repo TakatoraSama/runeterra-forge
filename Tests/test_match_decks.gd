@@ -2,9 +2,10 @@ extends "res://Tests/test_case.gd"
 
 ## MatchDecks — the deck constants and the sanitize() rule.
 ##
-## The constants are copies of two tables that live in autoload scripts (Deck.DEFAULT_DECK
-## and BotManager.BOT_DECK). They are read back here through get_script_constant_map(),
-## the same way MatchController used to, so the copies cannot drift silently.
+## The DEFAULT_DECK_IDS constant is a copy of the table that lives in Deck.gd
+## (Deck.DEFAULT_DECK). It is read back here through get_script_constant_map(),
+## the same way MatchController used to, so the copy cannot drift silently.
+## BOT_DECK_IDS is now the single source of truth for the offline bot's deck.
 
 const UNKNOWN := "ThisCardDoesNotExist1"
 ## 65 entries: one more than MatchDecks.MAX_RAW_ENTRIES, so sanitize refuses it outright.
@@ -22,11 +23,10 @@ func test_default_deck_ids_are_deck_default_deck_in_order() -> void:
 	assert_eq(MatchDecks.DEFAULT_DECK_IDS, expected, "Deck.DEFAULT_DECK ids, in order")
 
 
-func test_bot_deck_ids_are_bot_manager_bot_deck() -> void:
-	var expected: Array[String] = []
-	for card_id: Variant in _script_constant(load("res://Scripts/BotManager.gd"), "BOT_DECK", []):
-		expected.append(str(card_id))
-	assert_eq(MatchDecks.BOT_DECK_IDS, expected, "BotManager.BOT_DECK")
+func test_bot_deck_ids_are_known_cards() -> void:
+	assert_eq(MatchDecks.BOT_DECK_IDS.size(), 10, "bot deck size")
+	for card_id: String in MatchDecks.BOT_DECK_IDS:
+		assert_true(CardDatabase.CARDS.has(card_id), "%s is a known card" % card_id)
 
 
 func test_default_deck_has_exactly_deck_size_known_cards() -> void:
@@ -151,7 +151,7 @@ func test_sanitize_never_hands_out_a_constant() -> void:
 func test_sanitize_output_starts_a_real_match() -> void:
 	# The point of the rule: whatever comes out is a deck the engine can build. The bot
 	# deck is passed through as the engine gets it — MatchSetup.new_match does not pad
-	# it, so player 0 holds exactly the 10 ids BotManager has always supplied.
+	# it, so player 0 holds exactly the 10 ids of MatchDecks.BOT_DECK_IDS.
 	var deck := MatchDecks.sanitize(MatchDecks.DEFAULT_DECK_IDS.duplicate())
 	var state := MatchSetup.new_match(MatchDecks.BOT_DECK_IDS, deck, 4242)
 	assert_eq(state.players[1].deck.size(), MatchDecks.DECK_SIZE, "player 1 got a full deck")

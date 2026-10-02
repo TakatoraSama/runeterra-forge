@@ -10,14 +10,12 @@ const COLLISION_MASK_DECK = 4
 const COLLISION_MASK_LANE = 8
 
 var card_manager_reference
-var deck_reference
 var card_preview_reference  # Set in _ready; used to block game input while preview is open
 var lane_preview_reference
 var board_reference
 
 func _ready() -> void:
 	card_manager_reference = $"../CardManager"
-	deck_reference = $"../Deck"
 	board_reference = $"../Board"
 	card_preview_reference = get_parent().get_node_or_null("CardPreview")
 	lane_preview_reference = get_parent().get_node_or_null("LanePreview")
@@ -44,10 +42,9 @@ func _input(event):
 			and event.keycode == KEY_F9:
 		_debug_toggle_stun_at_cursor()
 
-
 func _debug_toggle_stun_at_cursor() -> void:
 	"""Debug builds only: F9 toggles the Stun visual on the card under the cursor.
-	Visual-only — does not register the stun with StunManager."""
+	Visual-only — it only adds/removes the runtime Stun keyword on the card view."""
 	var card = _get_in_play_card_at_cursor()
 	if card == null:
 		var parameters = PhysicsPointQueryParameters2D.new()
@@ -80,9 +77,8 @@ func raycast_at_cursor():
 				card_manager_reference.start_drag(card_found)
 			return
 		elif mask == COLLISION_MASK_DECK:
-			# Click-to-draw disabled — auto-draw is handled by GameManager now.
-			# deck_reference.draw_card()
-			print("Deck clicked. Cards left: ", deck_reference.player_deck.size())
+			# Click-to-draw was an old-engine debug path and is deleted:
+			# the Match engine owns the deck and Deck.gd is view-only.
 			return
 
 func _handle_right_click() -> void:

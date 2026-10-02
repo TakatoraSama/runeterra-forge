@@ -57,7 +57,6 @@ func _ready() -> void:
 func _on_host_pressed() -> void:
 	if not network_manager:
 		return
-	BotManager.bot_enabled = false
 	# MatchNet first: the RPC path has to exist before a single packet is exchanged.
 	_ensure_match_net(true)
 	var error = network_manager.host_game()
@@ -71,7 +70,6 @@ func _on_host_pressed() -> void:
 func _on_join_pressed() -> void:
 	if not network_manager:
 		return
-	BotManager.bot_enabled = false
 	var address = ip_input.text.strip_edges()
 	if address == "":
 		address = "127.0.0.1"
@@ -94,17 +92,9 @@ func _on_join_pressed() -> void:
 
 
 func _on_offline_pressed() -> void:
-	# Engine mode (default): the Match engine + presenter own the match. `--engine=old`
-	# keeps the BotManager + GameManager turn loop below.
-	if not _dev_engine_old:
-		_start_engine_offline()
-		return
-	BotManager.bot_enabled = true
-	# The old engine drives its own turn loop through GameManager's phase signal, so
-	# --autoendturn / --quit-on-end hook into that path instead of the presenter.
-	connect_old_engine_dev_driver()
-	status_label.text = "Starting offline..."
-	_start_game()
+	"""Start an offline match on the Match engine. Nothing else here touches the
+	board: the presenter builds the view."""
+	_start_engine_offline()
 
 
 func _start_engine_offline() -> void:
@@ -114,8 +104,8 @@ func _start_engine_offline() -> void:
 	_connect_quit_on_end(session_controller)
 
 	panel.visible = false
-	# Decks: the same selection Deck._build_player_deck() makes (a complete saved
-	# deck, else the default deck) and the offline bot's deck.
+	# Decks: the human's saved deck when complete (else the default deck) and the
+	# offline bot's deck, via MatchController.
 	session_controller.call("start_offline",
 		MatchController.human_deck_ids(), MatchController.bot_deck_ids(), _dev_seed)
 
@@ -194,8 +184,8 @@ func _connect_quit_on_end(controller: Node) -> void:
 
 func _on_dev_presenter_idle(controller: Node) -> void:
 	"""`--quit-on-end` watches the presenter and quits once the controller says the
-	match is over (the same 3 s grace the old GameManager path used, so both peers have
-	printed their final lines before the process exits)."""
+	match is over (a 3 s grace so both peers have printed their final lines
+	before the process exits)."""
 	if _dev_quit_done or not _dev_quit_on_end:
 		return
 	if controller == null or not bool(controller.call("is_match_over")):
@@ -304,15 +294,6 @@ func _on_lobby_disconnect(reason: String) -> void:
 	_set_buttons_enabled(true)
 
 
-func _start_game() -> void:
-	panel.visible = false
-
-	# Tell GameManager to begin
-	var game_manager = get_node("/root/Main/GameManager")
-	if game_manager and game_manager.has_method("start_game"):
-		game_manager.start_game()
-
-
 func _set_buttons_enabled(enabled: bool) -> void:
 	host_button.disabled = not enabled
 	join_button.disabled = not enabled
@@ -328,9 +309,7 @@ const DEV_JOIN_RETRY_INTERVAL := 1.0
 const DEV_JOIN_MAX_ATTEMPTS := 15
 
 var _dev_autojoin_ip: String = ""
-var _dev_autoendturn: bool = false
 var _dev_autoplay: bool = false
-var _dev_engine_old: bool = false
 var _dev_offline: bool = false
 var _dev_quit_done: bool = false
 var _dev_quit_on_end: bool = false
@@ -359,14 +338,10 @@ func _parse_dev_args() -> void:
 			_dev_quit_on_end = true
 		elif arg == "--offline":
 			_dev_offline = true
-		elif arg == "--autoendturn":
-			_dev_autoendturn = true
 		elif arg == "--autoplay":
 			_dev_autoplay = true
 		elif arg == "--verify-view":
 			_dev_verify_view = true
-		elif arg.begins_with("--engine="):
-			_dev_engine_old = arg.substr("--engine=".length()) == "old"
 		elif arg.begins_with("--seed="):
 			_dev_seed = int(arg.substr("--seed=".length()))
 
@@ -380,9 +355,6 @@ func _parse_dev_args() -> void:
 ## join_game() returns OK as soon as the ENet client peer is created, not when it
 ## connects, so each failure emits this signal again — the attempt count has to
 ## live in a member, otherwise every call would restart at 1 and never give up.
-## --autoendturn is gone with the old online path (M5a autoplays through
-## MatchBot on both peers); it is only still honoured by the `--engine=old` code,
-## which keeps its own GameManager turn loop.
 func _on_dev_join_failed() -> void:
 	if _dev_autojoin_ip == "":
 		return
@@ -397,30 +369,3 @@ func _on_dev_join_failed() -> void:
 	_set_buttons_enabled(true)
 	print("[DEV] join attempt %d" % _dev_join_attempts)
 	network_manager.join_game(_dev_autojoin_ip)
-
-
-## The old engine's own dev driver: `--engine=old` still runs the GameManager turn
-## loop, so `--autoendturn` and `--quit-on-end` are driven from its phase signal.
-## Nothing in the M5a path comes through here.
-func connect_old_engine_dev_driver() -> void:
-	if not OS.is_debug_build():
-		return
-	if not (_dev_autoendturn or _dev_quit_on_end):
-		return
-	var game_manager = get_node("/root/Main/GameManager")
-	if game_manager:
-		game_manager.phase_changed.connect(_on_dev_phase_changed)
-
-
-func _on_dev_phase_changed(game_phase: int, round_phase: int, _turn: int, _active: int) -> void:
-	var game_manager = get_node("/root/Main/GameManager")
-	if not game_manager:
-		return
-	if _dev_autoendturn \
-			and game_phase == GameManager.GamePhase.TURN_LOOP \
-			and round_phase == GameManager.RoundPhase.PLAY:
-		await get_tree().create_timer(0.5).timeout
-		game_manager.end_play_phase()
-	if _dev_quit_on_end and game_phase == GameManager.GamePhase.GAME_END:
-		await get_tree().create_timer(3.0).timeout
-		get_tree().quit()

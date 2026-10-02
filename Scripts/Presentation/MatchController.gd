@@ -830,10 +830,10 @@ func _print_leaks(problems: Array) -> void:
 # ----------------------------
 
 ## Card ids for the human's offline deck: the active saved deck when it is complete and
-## every id is known, otherwise MatchDecks.DEFAULT_DECK_IDS — the same rule as
-## Deck._build_player_deck. MatchDecks owns the rule (and DECK_SIZE); this only reads
-## the saved ids out of the DeckManager autoload, because a guest's deck arrives the
-## same way through the join handshake.
+## every id is known, otherwise MatchDecks.DEFAULT_DECK_IDS — the same rule
+## MatchDecks.sanitize applies. MatchDecks owns the rule (and DECK_SIZE); this only
+## reads the saved ids out of the DeckManager autoload, because a guest's deck arrives
+## the same way through the join handshake.
 static func human_deck_ids() -> Array[String]:
 	var saved: Array = []
 	var dm := _autoload(&"DeckManager")

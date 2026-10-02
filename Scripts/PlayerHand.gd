@@ -13,7 +13,8 @@ func _ready() -> void:
 
 
 func _ensure_layout_initialized() -> void:
-	# Cards can be added before this node's _ready() runs (e.g. GameManager draws on startup),
+	# Cards can be added before this node's _ready() runs (e.g. the presenter deals the
+	# opening hand while Main is still being built),
 	# so make sure layout values are always initialized before use.
 	if center_screen_x == 0.0:
 		center_screen_x = get_viewport().size.x / 2.0

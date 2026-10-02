@@ -70,24 +70,12 @@ func _ready() -> void:
 		queue_redraw()
 
 
-func pick_random_lane_ids() -> Array:
-	"""Returns a shuffled array of 3 appearable lane IDs for server to broadcast."""
-	var lane_ids := _get_appearable_lane_ids()
-	lane_ids.shuffle()
-	# Ensure exactly COLUMNS entries (wrap if fewer available)
-	var result: Array = []
-	for col in range(COLUMNS):
-		result.append(str(lane_ids[col % lane_ids.size()]))
-	return result
-
-
 ## Create and populate 3 lane scenes using the given lane ID list (index = column).
 ## A BLANK id means "not revealed yet" and is rendered as a placeholder, in EVERY
 ## column including 0: the engine reveals column 0 at game start, but the assignment
 ## event still arrives before that reveal, and a viewer must never be able to read a
-## lane the engine has not published. The old code hard-coded "column 0 is always
-## visible", which put a lane on screen that this viewer was not entitled to see.
-## View-only: no LaneManager, no gameplay wiring.
+## lane the engine has not published.
+## View-only: no lane gameplay wiring.
 func create_lane_views(ordered_lane_ids: Array) -> void:
 	if not lane_scene:
 		return
@@ -125,40 +113,6 @@ func create_lane_views(ordered_lane_ids: Array) -> void:
 			# col 1 → turn 2, col 2 → turn 3: a lane is revealed on the turn after the
 			# one before it, so column `col` opens on turn col + 1.
 			_apply_lane_visuals_hidden(lane_instance, col + 1)
-
-
-## Same as create_lane_views(), plus wiring LaneManager so it can track reveals and
-## lane effects (old-engine path). LaneManager owns the reveal schedule there and
-## reveals column 0 itself, so the board is handed the ids with columns 1 and 2
-## blanked out: create_lane_views() now treats a blank id as hidden in EVERY column,
-## and the old path must not end up showing all three at once.
-func create_lanes_from_ids(ordered_lane_ids: Array) -> void:
-	"""Same as create_lane_views(), plus wiring LaneManager so it can track
-	reveals and lane effects (old-engine path)."""
-	if not lane_scene:
-		return
-
-	var visible_ids: Array = ordered_lane_ids.duplicate()
-	for col in range(1, visible_ids.size()):
-		visible_ids[col] = ""
-	create_lane_views(visible_ids)
-	# LaneManager keeps the full list (it is the authority on the old path) and reveals
-	# columns 1 and 2 through reveal_lane_visuals() on turns 2 and 3.
-	reveal_lane_view(0, str(ordered_lane_ids[0]) if not ordered_lane_ids.is_empty() else "")
-
-	# Inform LaneManager of the lane assignment so it can track reveals and effects
-	LaneManager.setup_lanes(ordered_lane_ids)
-
-
-func _get_appearable_lane_ids() -> Array:
-	var lane_ids: Array = []
-	for lane_id in LaneDatabase.LANES.keys():
-		var lane_data: Dictionary = LaneDatabase.LANES.get(str(lane_id), {})
-		if bool(lane_data.get("Appearable", false)):
-			lane_ids.append(str(lane_id))
-	return lane_ids
-
-
 func _apply_lane_visuals_hidden(lane_instance: Node, reveal_turn: int) -> void:
 	"""Apply placeholder visuals to a lane that hasn't been revealed yet."""
 	if not lane_instance:
@@ -191,10 +145,6 @@ func reveal_lane_view(col: int, lane_id: String = "") -> void:
 	lane_instance.set_meta("lane_id", lane_id if not lane_id.is_empty() \
 		else str(lane_instance.get_meta("lane_id", "")))
 	lane_instance.set_meta("lane_reveal_turn", -1)
-
-func reveal_lane_visuals(col: int) -> void:
-	"""Called by LaneManager when a hidden lane becomes revealed."""
-	reveal_lane_view(col)
 
 
 func _apply_lane_visuals(lane_instance: Node, lane_data: Dictionary) -> void:

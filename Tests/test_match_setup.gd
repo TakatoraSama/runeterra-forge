@@ -2,10 +2,9 @@ extends "res://Tests/test_case.gd"
 
 ## MatchSetup.new_match() — deck creation, owners, shuffling and determinism.
 ##
-## The decks are the real ones used by the game: Deck.DEFAULT_DECK (12 ids) and
-## BotManager.BOT_DECK (10 ids, padded to 12). Both live in autoloads without a
-## class_name, so the ids are duplicated here on purpose — the engine and these
-## tests must not touch autoloads.
+## The decks are the real ones used by the game: Deck.DEFAULT_DECK (12 ids) and the
+## bot's deck (MatchDecks.BOT_DECK_IDS, 10 ids padded to 12). The ids are duplicated
+## here on purpose, so these tests pin the decks independently of the code under test.
 
 const DECK_0: Array[String] = [
 	"Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Ahri1",

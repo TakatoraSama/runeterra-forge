@@ -15,9 +15,6 @@ var aura_cost_modifier: int = 0
 var cost_modifier: int = 0
 var _dissolve_mat: ShaderMaterial = null
 
-var _card_manager: Node = null
-var _game_manager: Node = null
-
 @onready var card_back: Node2D = $"CardBack"
 @onready var animation_player: AnimationPlayer = $"AnimationPlayer"
 
@@ -29,8 +26,6 @@ func _ready() -> void:
 	_set_card_back_hidden()
 	if animation_player:
 		animation_player.animation_finished.connect(_on_animation_finished)
-	_card_manager = get_node_or_null("/root/Main/CardManager")
-	_game_manager = get_node_or_null("/root/Main/GameManager")
 	var mat := ShaderMaterial.new()
 	mat.shader = _DISSOLVE_SHADER
 	mat.set_shader_parameter("dissolve_amount", 0.0)
@@ -113,21 +108,8 @@ func _on_area_2d_mouse_exited() -> void:
 	emit_signal("hovered_off", self)
 
 
-func on_summon() -> void:
-	await AbilityResolver.execute_play_ability(self)
-
-
-func on_round_start() -> bool:
-	return await AbilityResolver.execute_round_start_ability(self)
-
-
-func on_round_end() -> bool:
-	return await AbilityResolver.execute_round_end_ability(self)
-
-
-func on_game_end() -> bool:
-	return await AbilityResolver.execute_game_end_ability(self)
-
+# Ability triggers used to live on this view and were removed: the Match engine
+# owns abilities now.
 
 func add_runtime_keyword(keyword_name: String) -> void:
 	if keyword_name in runtime_keywords:
@@ -162,10 +144,3 @@ func play_discard_dissolve(duration: float = 0.8) -> void:
 		var tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		tween.tween_property(self, "modulate:a", 0.0, duration)
 		await tween.finished
-
-
-func on_spell_resolved() -> void:
-	"""Called after a spell's ability resolves. Plays a quick dissolve then frees the card.
-	Spell removal does NOT count as killed or discarded — no tracker entries are made."""
-	await play_discard_dissolve(0.4)
-	queue_free()

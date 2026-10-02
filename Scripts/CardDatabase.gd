@@ -1688,10 +1688,9 @@ static func apply_power_visual(card_node: Node, card_data: Dictionary, source_ca
 	if power_label:
 		power_label.visible = should_show_power
 		if should_show_power:
-			if source_card and source_card.has_method("get_power_display_text_for_base"):
-				power_label.text = source_card.get_power_display_text_for_base(int(card_data.get("Power", 0)))
-			else:
-				power_label.text = str(card_data.get("Power", 0))
+			# The printed Power. A live card's modifiers are applied on top by its
+			# owner (MatchPresenter._refresh_power_label).
+			power_label.text = str(card_data.get("Power", 0))
 		else:
 			power_label.text = ""
 

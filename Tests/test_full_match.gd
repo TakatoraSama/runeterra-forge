@@ -14,7 +14,7 @@ const DEFAULT_DECK_IDS: Array[String] = [
 	"Kennen1", "NavoriConspirator", "Janna1", "Draven1", "Rumble1", "Sion1",
 ]
 
-## BotManager.BOT_DECK.
+## The bot's deck (MatchDecks.BOT_DECK_IDS).
 const BOT_DECK_IDS: Array[String] = [
 	"Azir1", "Renekton1", "Nasus1", "Xerath1", "Tryndamere1", "Trundle1",
 	"Ahri1", "Kennen1", "NavoriConspirator", "SolitaryMonk",
