@@ -301,12 +301,22 @@ func _return_swap_card_to_origin() -> void:
 
 
 func _finish_swap_drag_engine() -> void:
-	"""Engine mode swap release. The card itself never moves here: a valid drop
-	becomes a swap_card intent (the engine keeps the card where it is until the
-	SWAP_LANE phase and the presenter animates it), an invalid one snaps back."""
+	"""Engine mode swap release. A valid drop becomes a swap_card intent; the engine
+	keeps the card in its origin zone until SWAP_LANE and the presenter lays it out in
+	the destination. An invalid drop snaps back.
+
+	On a valid drop the card is immediately taken to BOARD size and parked on the
+	destination slot, rather than being left where it was dropped. _process would
+	otherwise keep following the mouse, and between the drop and swap_started arriving
+	the card would sit there at DRAG size (0.2) instead of board size (0.15) — on a LAN
+	guest that gap is a whole network round trip. Parking it on the free slot the drop
+	landed on is the closest thing to the final display slot that is knowable here; the
+	layout appends incoming swaps at the END of the destination zone, so the presenter
+	still tweens it from here onto its real slot when swap_started lands."""
 	_is_swap_drag = false
 	var controller := _match_controller()
-	var instance_id := _engine_instance_id(card_being_dragged)
+	var card = card_being_dragged
+	var instance_id := _engine_instance_id(card)
 	var dest_slot = board_reference.get_next_available_slot_for_position(get_global_mouse_position())
 	var dest_zone: Vector2i = board_reference.get_zone_for_slot(dest_slot) if dest_slot else Vector2i(-1, -1)
 	# Valid destination: our own row, a different column, a lane (not the spell zone).
@@ -317,9 +327,15 @@ func _finish_swap_drag_engine() -> void:
 			and dest_zone.y == ENGINE_OWN_ROW \
 			and dest_zone.x != _swap_drag_origin_zone.x \
 			and dest_zone.x >= 0:
+		# Detach BEFORE parking: _process moves card_being_dragged to the mouse every
+		# frame and would drag the card straight back off the slot it was just parked on.
 		card_being_dragged = null
 		_swap_drag_origin_slot = null
 		_swap_drag_origin_zone = Vector2i(-1, -1)
+		card.scale = Vector2(CARD_SMALLER_SCALE, CARD_SMALLER_SCALE)
+		if dest_slot:
+			card.position = dest_slot.position
+		card.z_index = CARD_BOARD_Z_INDEX
 		controller.submit_local(MatchIntents.swap_card(instance_id, dest_zone.x))
 		return
 	# Invalid destination — return card to its origin slot

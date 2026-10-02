@@ -88,13 +88,47 @@ func zone_cards(col: int, owner: int) -> Array[int]:
 	return result
 
 
+## How many of `owner`'s PENDING swaps leave `col` and are still going to happen: an
+## entry counts only while its card is still `location == BOARD` in `card.col == col`.
+##
+## This is the room a lane frees up the moment an Elusive card is dropped into another
+## lane, exactly like the original game: while Ahri is on her way out of Left, Left can
+## take the new unit straight away instead of waiting for SWAP_LANE.
+##
+## The "still in col" test is what keeps the number honest WHILE _execute_swaps walks
+## the queue: the moment a swap's card actually moves, its entry no longer frees
+## anything (remove_from_zone clears card.col), so a later swap in the same queue is
+## never told that a slot is coming free twice. A card that left its column for another
+## reason (killed, recalled) has the same effect: its pending entry is dead, and both
+## checks above drop it.
+func outgoing_swaps(col: int, owner: int) -> int:
+	var count: int = 0
+	for entry: Dictionary in pending_swaps:
+		if int(entry.get("player", -1)) != owner:
+			continue
+		if int(entry.get("from_col", -1)) != col:
+			continue
+		var c := card(int(entry.get("instance_id", -1)))
+		if c == null or c.location != CardState.Location.BOARD or c.col != col:
+			continue
+		count += 1
+	return count
+
+
 ## Returns true when a zone still has room (the spell zone holds SPELL_SLOTS cards).
 ## A column outside 0..COLUMNS-1 that is not SPELL_COL has no zone, so it reports false.
+##
+## A lane column whose Elusive card is already queued OUT of it counts that as extra
+## room, so a lane can hold SLOTS_PER_ZONE + outgoing_swaps() cards for the rest of the
+## PLAY phase. The newest play therefore gets engine slot 4 in a full lane that is
+## losing a card, and the lane compacts back to 0..3 when the swap runs at SWAP_LANE.
+## Nothing else changes: a swap never grants room in the SPELL column, and every
+## place_card() outside a pending swap still sees the plain limit.
 func zone_has_space(col: int, owner: int) -> bool:
 	if not _is_valid_col(col):
 		return false
 	var limit: int = SPELL_SLOTS if col == SPELL_COL else SLOTS_PER_ZONE
-	return zone_cards(col, owner).size() < limit
+	return zone_cards(col, owner).size() < limit + outgoing_swaps(col, owner)
 
 
 ## Places a card in a zone. slot -1 appends, otherwise the card is inserted at min(slot, size)

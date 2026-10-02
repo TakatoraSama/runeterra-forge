@@ -223,7 +223,7 @@ func _play_card(player: int, intent: Dictionary) -> void:
 	if not is_spell and lanes.is_restricted(col):
 		_reject(player, type_name, "noxkraya", id)
 		return
-	if state.zone_cards(col, player).size() + _swap_reservations(player, col) >= _zone_capacity(col):
+	if _room_in(col, player) <= 0:
 		_reject(player, type_name, "zone_full", id)
 		return
 	var cost: int = card.get_current_cost()
@@ -330,7 +330,7 @@ func _swap_card(player: int, intent: Dictionary) -> void:
 	if to_col == card.col:
 		_reject(player, type_name, "same_column", id)
 		return
-	if state.zone_cards(to_col, player).size() + _swap_reservations(player, to_col) >= MatchState.SLOTS_PER_ZONE:
+	if _room_in(to_col, player) <= 0:
 		_reject(player, type_name, "zone_full", id)
 		return
 	state.pending_swaps.append({
@@ -389,6 +389,49 @@ func _resolve_round() -> void:
 
 ## Moves every queued swap, flip-first player first. A swap is dropped when the card
 ## left its column in the meantime or when the destination filled up meanwhile.
+##
+## WHY QUEUE ORDER CANNOT OVERFLOW A DESTINATION (and cannot silently drop one either,
+## as long as no ability places a card here, see the caveat below):
+##
+## For one lane L let free(L) = SLOTS_PER_ZONE - |L| + out(L), where out(L) counts the
+## swaps out of L that have NOT run yet and whose card is still in L (exactly what
+## MatchState.outgoing_swaps counts while the queue is being walked).
+##   * At SWAP_LANE, free(L) = room_L + reservations_L >= 0: a play or a swap into L was
+##     only accepted while _room_in(L) >= 1, room_L only ever drops by accepting exactly
+##     such an arrival (it starts at SLOTS_PER_ZONE - |L| >= 0) and rises by 1 for every
+##     swap queued OUT of L, which is checked against its destination, not against L.
+##   * Walking the queue in order keeps free(L) >= 0: a card LEAVING L takes 1 off both
+##     |L| and out(L) (free unchanged), a card ARRIVING is only allowed when free >= 1
+##     and then lowers free by 1, and a swap that is dropped changes nothing.
+##   * When the walk is over out(L) = 0, so |L| <= SLOTS_PER_ZONE: no lane is ever left
+##     over capacity, and the lane compacts to slots 0..3 as the cards leave.
+##
+## That is also why an accepted swap is never dropped for a full destination: arriving
+## into a full lane is only possible when free(L) >= 1, i.e. |L| == SLOTS_PER_ZONE and a
+## swap OUT of L was already queued — because a swap INTO a full lane with nothing queued
+## out has free(L) == 0 and _swap_card rejects it. Such a swap into L was therefore queued
+## AFTER that swap out of L (queueing it first would have seen free(L) == 0), and queue
+## order runs the departure before the arrival. The arrival finds the slot already free.
+##
+## The flip-first ordering does not weaken any of this: it only interleaves the two
+## PLAYERS, and a swap only ever touches its owner's own zones. Every count above is
+## per (col, owner) — _swap_reservations and MatchState.outgoing_swaps both filter on the
+## owner — so player 0's swaps can neither fill nor drain player 1's zones, and each
+## player's queue is still walked in the order it was queued.
+##
+## CAVEAT — the argument above covers the SWAP QUEUE only. abilities.on_swap_arrive() runs
+## in the middle of the walk and may place a card (Irelia's {swap} summons a Blade into
+## the lane it just LEFT), through MatchState.zone_has_space, which folds in the same
+## outgoing count. Such a placement may therefore take the very slot a LATER arrival was
+## reserved for, and that arrival is then dropped by the space check below. Measured:
+## lane 0 = [Irelia, Chip, Chip, Chip], Irelia queued 0->1 and a Zed queued 2->0 — both
+## accepted at queue time (lane 0 frees a slot, so room = 4 - 4 + 1 = 1); at SWAP_LANE
+## Irelia leaves, the Blade takes the freed slot and the Zed is dropped. No lane ever
+## goes over capacity (lane 0 ends at 4); the cost is that one accepted swap is cancelled.
+## This is a WIDENING of an existing path, not a new one: the "destination filled up
+## meanwhile" drop has always been legal for a swap, but before the outgoing_swaps rule
+## no swap could ever be reserved into a FULL lane, so the window was unreachable.
+## Tests/test_swap_room.gd pins both halves of this.
 func _execute_swaps() -> void:
 	var sorted: Array = []
 	for p in _players_in_order():
@@ -607,6 +650,25 @@ func _is_on_board(id: int) -> bool:
 	if card == null:
 		return false
 	return card.location == CardState.Location.BOARD or card.location == CardState.Location.SPELL_ZONE
+
+
+## How many more cards could still be put into (col, owner) right now:
+##   capacity - zone_cards + outgoing_swaps - reservations
+##
+## ONE formula for both _play_card and _swap_card, so the two can never disagree about
+## whether a lane is free. `outgoing_swaps` is the room a lane frees the moment an
+## Elusive card is queued OUT of it (MatchState.outgoing_swaps): that is what lets a
+## full lane whose Ahri is leaving take the new unit immediately, as the original game
+## did. `reservations` are the slots already spoken for by swaps queued INTO this lane,
+## so the play and the swap compete for the same free slot instead of both taking it.
+##
+## The card being swapped contributes nothing extra: it frees room in its ORIGIN lane,
+## not in the destination, and _swap_card rejects same_column before asking.
+func _room_in(col: int, owner: int) -> int:
+	return _zone_capacity(col) \
+		- state.zone_cards(col, owner).size() \
+		+ state.outgoing_swaps(col, owner) \
+		- _swap_reservations(owner, col)
 
 
 ## How many pending swaps `player` already holds for column `col`; those slots are

@@ -639,14 +639,19 @@ func _send_presentation_done() -> void:
 ## The intents --autoplay submits for this peer. The guest has no MatchState, so it
 ## decides from the snapshot the host sent — exactly the information a human has on
 ## that peer, which is what keeps autoplay from becoming a hidden-information channel.
+##
+## Both branches pass allow_swaps = true, so an autoplay peer also uses the Elusive lane
+## swaps and the offline / LAN self-tests actually exercise that path (including the
+## full-lane overflow the new room rule allows). The flag is what keeps the real
+## opponent bot (the OTHER decide() call above) and every other caller unchanged.
 func _decide_autoplay() -> Array:
 	if mode == Mode.GUEST:
 		if _latest_snapshot.is_empty():
 			return []
-		return MatchBot.decide_from_snapshot(_latest_snapshot, human_rng)
+		return MatchBot.decide_from_snapshot(_latest_snapshot, human_rng, true)
 	if state == null:
 		return []
-	return MatchBot.decide(state, local_player, human_rng)
+	return MatchBot.decide(state, local_player, human_rng, true)
 
 
 ## Once the match is over on a LAN peer there is nothing left to play and nobody to

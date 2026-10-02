@@ -29,11 +29,10 @@
 ##
 ## The spell column -1 maps to (-1, 1) for the local player and (-1, 0) for the
 ## opponent, which is exactly BoardGeneration.SPELL_ZONE_ALLIED / SPELL_ZONE_ENEMY.
-## The engine slot index equals the board slot index: a zone list is compact, and
-## Board.reposition_cards_in_zone puts list index i on entry i of slots_by_zone —
-## which is engine slot i on the BOTTOM row and engine slot (n - 1 - i) on the TOP
-## one, because create_all_slots fills that row in reverse. _build_slot_order()
-## measures that mapping from the live slot nodes instead of assuming it.
+## Board positions are never computed from an engine slot index. Every card's position,
+## card_slot_is_in and slot flag comes from Board.reposition_cards_in_zone, driven by the
+## display layout (_display_ids) — which is why the reversed top row needs no mapping of its
+## own: _board_zone picks the row and the Board fills that row's own slot list.
 ##
 ## Events arrive already redacted through MatchEvents.redact_for(event, local_player), so the
 ## opponent's plays only show up face-down in resolve_started and their identities arrive
@@ -186,8 +185,6 @@ var _local_hand: Array[int] = []
 ## CARD_PLAYED is redacted to null), so the size is the one hand fact that has to be taken
 ## from the authoritative snapshot rather than derived from the event stream.
 var _opponent_hand_count: int = 0
-## instance_id -> the position a swap preview is currently showing.
-var _swap_preview: Dictionary = {}
 
 # ----------------------------
 # Queue
@@ -200,9 +197,6 @@ var _drain_generation: int = 0
 var _toast_label: Label = null
 ## The session-ended overlay, created on first use and freed by the next setup().
 var _session_overlay: CanvasLayer = null
-
-## board zone Vector2i(col, row) -> Array mapping engine slot index to index in slots_by_zone.
-var _slot_order: Dictionary = {}
 
 
 # ----------------------------
@@ -231,7 +225,6 @@ func setup(snapshot: Dictionary, local_player_id: int, p_controller: Node) -> vo
 	_zones.clear()
 	_local_hand.clear()
 	_pending_swaps.clear()
-	_swap_preview.clear()
 	_queue.clear()
 	_processing = false
 	_game_phase = MatchState.GamePhase.GAME_START
@@ -252,7 +245,6 @@ func setup(snapshot: Dictionary, local_player_id: int, p_controller: Node) -> vo
 
 	if _card_manager != null and "current_player_id" in _card_manager:
 		_card_manager.current_player_id = local_player
-	_build_slot_order()
 
 	# Lanes: every column starts blank (a blank id means HIDDEN, column 0 included —
 	# the old view assumed column 0 was always on screen, which is not true for a
@@ -661,6 +653,9 @@ func _process_event(event: Dictionary) -> void:
 
 func _on_turn_started(event: Dictionary) -> void:
 	_turn = int(event.get("turn", _turn))
+	# A round that opens with a swap still queued is a swap the engine never committed.
+	# Drop it here so the card cannot start the new turn sitting in the wrong lane.
+	_clear_stale_pending_swaps()
 	# A new round is a new turn's business: neither player has ended it, neither has any
 	# play to take back, and the play_opened that will reopen input belongs to the turn
 	# that is starting. Clearing it here is what keeps local_can_act() false until the
@@ -672,15 +667,25 @@ func _on_turn_started(event: Dictionary) -> void:
 	_refresh_controls()
 
 
+## SWAP_LANE deliberately does NOT clear the pending swaps. _execute_swaps walks the queue
+## in order and each step emits card_swapped and then the arriving card's {swap} ability —
+## a recall or a summon — which re-lays lanes. With the queue emptied at the phase change,
+## the first arrival's re-lay would find the SECOND card still registered in the model and
+## put it back on an origin-lane slot for the frames between that re-lay and its own
+## card_swapped: the reported pull-back, exactly, whenever a turn queues two swaps.
+## Keeping the entries until each card_swapped erases its own holds the display layout
+## across the whole batch. See _clear_stale_pending_swaps for the backstop.
 func _on_phase_changed(event: Dictionary) -> void:
 	_game_phase = int(event.get("game_phase", _game_phase))
 	_round_phase = int(event.get("round_phase", _round_phase))
 	_turn = int(event.get("turn", _turn))
-	# The engine clears its pending swaps inside the SWAP_LANE phase, right after this
-	# event, so the view drops them here too.
-	if _round_phase >= MatchState.RoundPhase.SWAP_LANE:
-		_pending_swaps.clear()
-		_swap_preview.clear()
+	if _round_phase >= MatchState.RoundPhase.RESOLVE:
+		# Past SWAP_LANE every swap that was going to run has reported in and erased its own
+		# entry, so anything still queued was DROPPED by the engine: its destination filled
+		# up mid-walk (Irelia's {swap} Blade can take the slot a later arrival reserved), or
+		# its card had already left. Dropping it here is what puts that card visibly back in
+		# its origin lane, which is the truth — the engine never moved it.
+		_clear_stale_pending_swaps()
 	_set_turn_text()
 	_refresh_controls()
 
@@ -1010,7 +1015,7 @@ func _on_play_undone(event: Dictionary) -> void:
 			continue
 		var node: Variant = entry.get("node", null)
 		_move_board_card_to_hand_view(id, node)
-		_swap_preview.erase(id)
+		_erase_pending_swap(id)
 		entry["location"] = ViewLocation.HAND
 		entry["resolved"] = false
 		entry["face_down"] = false
@@ -1039,68 +1044,124 @@ func _on_play_undone(event: Dictionary) -> void:
 # Swaps
 # ----------------------------
 
-## The preview: the card slides to where it would land, but the model keeps it at its
-## origin — the engine only commits the move at SWAP_LANE.
+## A queued swap re-lays the board straight away: the origin lane compacts, so the slot the
+## card vacated can take a new play in this same PLAY phase, and the destination grows by
+## one. Only the LAYOUT moves. The model keeps the card in its origin zone, because the
+## engine does too until SWAP_LANE, and _display_ids is what turns the two apart.
+##
+## The pending entry is appended before anything can bail out, so _pending_swaps mirrors
+## the engine's queue even when this card turns out to have no node to lay out.
 func _on_swap_started(event: Dictionary) -> void:
 	var pid := int(event.get("player", -1))
 	var id := int(event.get("instance_id", -1))
 	if pid != local_player or id < 0:
 		return
-	_pending_swaps.append({"instance_id": id, "to_col": int(event.get("to_col", -1))})
+	var to_col := int(event.get("to_col", -1))
+	_pending_swaps.append({"instance_id": id, "to_col": to_col})
+	var entry: Dictionary = _entries.get(id, {})
+	if entry.is_empty():
+		return
 	var node := node_for(id)
+	var from_col := int(entry["col"])
+	var owner := int(entry["owner"])
+	# Where the player let go. The layout then decides where the card really belongs — an
+	# incoming swap is appended at the END of the destination, which is not necessarily the
+	# free slot that was under the cursor — so this is the point the tween starts from.
+	var drop_position := Vector2.INF
+	if node != null:
+		drop_position = node.position
+	_sync_zone(from_col, owner)
+	_sync_zone(to_col, owner)
+	_refresh_collider(id)
 	if node == null:
 		return
-	var destination := _first_free_slot_position(int(event.get("to_col", -1)), pid)
-	if destination == Vector2.INF:
-		return
-	_swap_preview[id] = destination
+	# A drag leaves the card at drag size and drag z_index; the layout sets neither.
+	node.scale = Vector2(BOARD_CARD_SCALE, BOARD_CARD_SCALE)
 	node.z_index = DRAG_Z
+	var destination: Vector2 = node.position
+	if drop_position == Vector2.INF or drop_position.is_equal_approx(destination):
+		node.z_index = 0
+		return
 	var tween := node.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(node, "position", destination, SWAP_PREVIEW_SPEED)
 	await _race([tween.finished], SWAP_PREVIEW_SPEED + 1.0)
+	if not is_instance_valid(node):
+		return
 	node.z_index = 0
 
 
-## The old swap dance: snap the card back to its origin slot, then tween it across.
+## The engine has committed the move.
+##
+## A swap WE previewed has been laid out in its destination lane since the drop, so it is
+## already where it belongs: re-laying and stopping is all that is left. Snapping it to
+## its origin slot first — the old "dance" — is what read as being yanked back. An
+## opponent's swap was never previewed and still sits in its origin, so it keeps the
+## origin -> destination tween.
 func _on_card_swapped(event: Dictionary) -> void:
 	var id := int(event.get("instance_id", -1))
 	var from_col := int(event.get("from_col", -1))
 	var to_col := int(event.get("to_col", -1))
 	var slot := int(event.get("slot", -1))
-	_erase_pending_swap(id)
-	_swap_preview.erase(id)
+	var previewed := _erase_pending_swap(id)
 	var entry: Dictionary = _entries.get(id, {})
 	if entry.is_empty():
 		return
 	var node := node_for(id)
 	var owner := int(entry["owner"])
-	# Where the model says the card is now: its origin, which the preview may have moved.
-	var origin := _slot_position(int(entry["col"]), owner, int(entry["slot"]))
+	# Only an unpreviewed swap starts anywhere else.
+	var start_position := Vector2.INF
+	if node != null and not previewed:
+		start_position = node.position
 
 	_place_in_zone(entry, to_col, slot)
 	_sync_zone(from_col, owner)
+	_sync_zone(to_col, owner)
+	# The card kept its Elusive on the way across, so the click area it needs is the one it
+	# had; and a drag may have left it at drag size.
+	_refresh_collider(id)
 	if node == null:
 		return
-	var destination := _slot_position(to_col, owner, slot)
-	if destination == Vector2.INF:
-		destination = node.position
-	if origin != Vector2.INF:
-		node.position = origin
+	node.scale = Vector2(BOARD_CARD_SCALE, BOARD_CARD_SCALE)
+	node.z_index = 0
+	var destination: Vector2 = node.position
+	if start_position == Vector2.INF or start_position.is_equal_approx(destination):
+		return
 	node.z_index = DRAG_Z
 	var tween := node.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(node, "position", destination, SWAP_DURATION)
 	await _race([tween.finished], SWAP_DURATION + 1.0)
+	if not is_instance_valid(node):
+		return
 	node.z_index = 0
-	# The card kept its Elusive on the way across, so the click area it needs is the one
-	# it had: re-derive it from the model rather than assume every earlier path ran.
-	_refresh_collider(id)
 
 
-func _erase_pending_swap(id: int) -> void:
+## Removes the pending swap for `id` and reports whether there was one, which is how
+## _on_card_swapped tells a swap we previewed from an opponent's.
+func _erase_pending_swap(id: int) -> bool:
 	for i in range(_pending_swaps.size() - 1, -1, -1):
 		if int(_pending_swaps[i].get("instance_id", -1)) == id:
 			_pending_swaps.remove_at(i)
-			return
+			return true
+	return false
+
+
+## Drops pending swaps the engine never committed and re-lays every lane they touched, so a
+## card can never be stranded in a lane the engine did not move it to.
+##
+## Normally there is nothing to do: the engine clears its queue inside SWAP_LANE and
+## _on_phase_changed drops the view's copy on that same phase change. This is the backstop
+## for a swap that never arrives, and it runs where nothing is mid-tween, so re-laying here
+## cannot yank a card the way it would during SWAP_LANE itself.
+func _clear_stale_pending_swaps() -> void:
+	if _pending_swaps.is_empty():
+		return
+	for swap: Dictionary in _pending_swaps:
+		var entry: Dictionary = _entries.get(int(swap.get("instance_id", -1)), {})
+		if entry.is_empty():
+			continue
+		_sync_zone(int(entry["col"]), int(entry["owner"]))
+	_pending_swaps.clear()
+	_refresh_zone_power_texts()
 
 
 # ----------------------------
@@ -1110,6 +1171,10 @@ func _erase_pending_swap(id: int) -> void:
 ## Everyone's plays show face-down for a beat: the opponent's are spawned here for the
 ## first time, ours already sit on the board and just get their back raised.
 func _on_resolve_started(event: Dictionary) -> void:
+	# Past SWAP_LANE every committed swap has reported in, so anything still queued was
+	# never committed: its card goes back to the lane the engine still has it in, before the
+	# face-down beat starts.
+	_clear_stale_pending_swaps()
 	var plays: Variant = event.get("plays", [])
 	if plays is Array:
 		for raw: Variant in plays:
@@ -1441,7 +1506,6 @@ func _on_card_recalled(event: Dictionary) -> void:
 		# helper rather than being special-cased so the zone bookkeeping exists in exactly
 		# one place.
 		_move_board_card_to_hand_view(id, entry.get("node", null))
-		_swap_preview.erase(id)
 		_release_node(id, entry.get("node", null))
 		entry["card_id"] = ""
 		entry["resolved"] = false
@@ -1465,6 +1529,14 @@ func _on_card_recalled(event: Dictionary) -> void:
 	_refresh_collider(id)
 	_local_hand.insert(0, id)
 	_sync_hand_nodes()
+	# _sync_hand_nodes assigns PlayerHand.player_hand directly, so it gives the recalled
+	# node a place in the hand WITHOUT giving it a starting_position. add_card_to_hand
+	# then takes its "already in the hand" branch and tweens the card to Nil, which the
+	# engine rejects as a type mismatch every time a card is recalled. Laying the hand out
+	# here is what every other hand-sync site does (_drop_from_hand_model,
+	# _on_play_undone) and it is what fills starting_position in.
+	if _hand != null:
+		_hand.update_hand_position(RECALL_DURATION)
 	var scale_tween := node.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	scale_tween.tween_property(node, "scale", Vector2(HAND_CARD_SCALE, HAND_CARD_SCALE), RECALL_DURATION)
 	if _hand != null:
@@ -1488,7 +1560,7 @@ func _on_card_killed(event: Dictionary) -> void:
 	if node != null:
 		await _play_or_fade(node, &"card_killed", 0.5)
 	_remove_from_zone_model(id)
-	_swap_preview.erase(id)
+	_erase_pending_swap(id)
 	_release_node(id, node)
 	entry["location"] = ViewLocation.GONE
 	entry["face_down"] = false
@@ -1504,7 +1576,7 @@ func _on_spell_resolved(event: Dictionary) -> void:
 	var owner := int(entry["owner"])
 	var col := int(entry["col"])
 	_remove_from_zone_model(id)
-	_swap_preview.erase(id)
+	_erase_pending_swap(id)
 	entry["location"] = ViewLocation.GONE
 	entry["face_down"] = false
 	_sync_zone(col, owner)
@@ -1542,11 +1614,14 @@ func _on_intent_rejected(event: Dictionary) -> void:
 		_return_node_to_hand(node)
 
 
+## A refused swap. The card never left its origin lane, so the lane is re-laid — which is
+## what puts the node on its display slot — rather than positioned from the engine slot,
+## which can now be a slot the board does not have while an overflow card sits there.
 func _snap_back_to_origin(entry: Dictionary, node: Node) -> void:
-	_swap_preview.erase(int(entry["instance_id"]))
-	var origin := _slot_position(int(entry["col"]), int(entry["owner"]), int(entry["slot"]))
-	if origin != Vector2.INF:
-		node.position = origin
+	_erase_pending_swap(int(entry["instance_id"]))
+	if int(entry.get("location", ViewLocation.GONE)) == ViewLocation.BOARD:
+		_sync_zone(int(entry["col"]), int(entry["owner"]))
+	_refresh_collider(int(entry["instance_id"]))
 	node.scale = Vector2(BOARD_CARD_SCALE, BOARD_CARD_SCALE)
 	node.z_index = 0
 
@@ -1751,10 +1826,18 @@ func _await_anim(node: Node, anim: StringName, limit: float) -> bool:
 ## Only Signals may be passed: GDScript evaluates an Array literal eagerly, so putting a
 ## coroutine call in one would start it without an await (a hard error). Start a coroutine
 ## on its own line, connect to it, then race [] against the timer.
+## Awaits whichever of `signal_list` fires first, or `limit` seconds, whichever is sooner.
+## Bounded on purpose: a card freed mid-animation never emits, and an unbounded await there
+## stalls the whole event queue.
+##
+## The callback takes one OPTIONAL argument on purpose. The signals raced here are not all
+## argument-free — AnimationPlayer.animation_finished carries the anim name — and a
+## zero-parameter lambda connected to one of those raises "Method expected 0 argument(s),
+## but called with 1" on every single emission.
 func _race(signal_list: Array, limit: float) -> void:
 	var done := [false]
 	for awaited: Signal in signal_list:
-		var one_shot := func() -> void:
+		var one_shot := func(_emitted = null) -> void:
 			if not done[0]:
 				done[0] = true
 		awaited.connect(one_shot, CONNECT_ONE_SHOT)
@@ -1815,13 +1898,27 @@ func _await_level_up(node: Node, new_card_id: String) -> void:
 # Zones
 # ----------------------------
 
-## Writes `entry` into the engine zone (col, owner) at `slot`, then rebuilds that zone's
-## Board.cards_by_zone list so reposition_cards_in_zone puts every card on the slot the
-## engine gave it.
+## Moves a card's MODEL membership to (col, owner) and re-lays both the zone it left and
+## the one it joined.
+##
+## The erase from the zone the card is LEAVING is not optional. Every caller except a swap
+## was moving a card in from somewhere that was never a zone, so the old version only had to
+## de-duplicate the destination list; a card changing lanes (card_swapped) needs the old
+## list cleared too, or it stays registered in BOTH zones and the board lays it out twice.
+## The membership test guards the hand case: a hand card's col is -1, which is also the
+## SPELL column, so "not in the list" is what tells the two apart.
 func _place_in_zone(entry: Dictionary, col: int, slot: int) -> void:
 	var id := int(entry["instance_id"])
 	var owner := int(entry["owner"])
 	var previous_col := int(entry["col"])
+	if previous_col != col:
+		var leaving: Array = _zones.get(Vector2i(previous_col, owner), [])
+		var was_at := leaving.find(id)
+		if was_at >= 0:
+			leaving.remove_at(was_at)
+			for shifted_index in leaving.size():
+				var shifted: Dictionary = _entries.get(int(leaving[shifted_index]), {})
+				shifted["slot"] = shifted_index
 	var zone_key := Vector2i(col, owner)
 	if not _zones.has(zone_key):
 		_zones[zone_key] = []
@@ -1831,6 +1928,15 @@ func _place_in_zone(entry: Dictionary, col: int, slot: int) -> void:
 		ids.remove_at(at)
 	var index: int = ids.size() if slot < 0 else mini(maxi(slot, 0), ids.size())
 	ids.insert(index, id)
+	# The insert is usually an append, but it is NOT always: the engine sends an absolute
+	# slot, and a card_revealed naming a slot that a lane effect has already filled behind it
+	# lands in the middle and pushes everything after it up one. The engine's zones are
+	# compact, so those cards have that slot now and the view has to say so — without this
+	# two cards end up claiming the same slot and verify() reports the whole lane one short
+	# from the engine's point of view.
+	for position in ids.size():
+		var renumbered: Dictionary = _entries.get(int(ids[position]), {})
+		renumbered["slot"] = position
 	entry["col"] = col
 	entry["slot"] = index
 	entry["location"] = ViewLocation.BOARD
@@ -1895,37 +2001,71 @@ func _move_board_card_to_hand_view(id: int, node: Variant) -> void:
 		node.card_slot_is_in = null
 
 
-## Rebuilds one board zone from the model and lets the old repositioner lay the cards
-## out. Swap previews are re-applied afterwards: the model keeps a previewing card at
-## its origin, so a plain reposition would yank it back mid-gesture.
+## The zone's cards in DISPLAY order, which is not always the model's order.
+##
+## The model (_zones plus each entry's col/slot) stays exactly the engine's truth, so
+## verify() and the snapshot are untouched. The BOARD is laid out from this instead. A card
+## the local player has queued a swap out of leaves its lane's layout the moment the swap
+## is queued and arrives in the destination's layout the same way, which is what the
+## original game did: the origin compacts, so the freed slot can take a new play in this
+## same PLAY phase, and the destination grows to hold the card that is on its way.
+##
+## Incoming swaps are appended in QUEUE order, so two cards swapping into one lane land in
+## the order they were queued rather than the order their origin slots happened to have.
+## The outgoing card is identified by the model's own col, not by a from_col in the pending
+## entry: the engine leaves the card in its origin zone until SWAP_LANE, so that is where
+## the entry still says it is.
+##
+## The opponent never appears here. swap_started is private to its owner, so _pending_swaps
+## only ever holds the LOCAL player's swaps and the opponent's rows lay out from the model
+## alone, exactly as before.
+func _display_ids(col: int, owner: int) -> Array:
+	var outgoing: Array[int] = []
+	var incoming: Array[int] = []
+	for swap: Dictionary in _pending_swaps:
+		var id := int(swap.get("instance_id", -1))
+		if id < 0:
+			continue
+		var entry: Dictionary = _entries.get(id, {})
+		if entry.is_empty() or int(entry.get("owner", -1)) != owner:
+			continue
+		if int(swap.get("to_col", -1)) == col:
+			incoming.append(id)
+		elif int(entry.get("col", -1)) == col:
+			outgoing.append(id)
+	var ids: Array = []
+	for raw: Variant in _zones.get(Vector2i(col, owner), []):
+		var id := int(raw)
+		if not outgoing.has(id):
+			ids.append(id)
+	ids.append_array(incoming)
+	return ids
+
+
+## Rebuilds one board zone from the DISPLAY layout and lets the old repositioner lay the
+## cards out, which is what gives every card a real slot, a card_slot_is_in and its slot's
+## card_in_slot flag. Drops, right-click hit tests and the collider refresh all read those,
+## so a queued swap needs no special casing anywhere downstream.
 ##
 ## The model is keyed by the engine's absolute (col, owner); the Board is addressed by
 ## the screen (col, row), which is the same thing only for the local player.
 func _sync_zone(col: int, owner: int) -> void:
 	if _board == null or col < MatchState.SPELL_COL:
 		return
-	var ids: Array = _zones.get(Vector2i(col, owner), [])
 	var nodes: Array = []
-	for raw: Variant in ids:
+	for raw: Variant in _display_ids(col, owner):
 		var node := node_for(int(raw))
 		if node != null:
 			nodes.append(node)
 	var board_zone := _board_zone(col, owner)
 	_board.cards_by_zone[board_zone] = nodes
 	_board.reposition_cards_in_zone(board_zone)
-	for id: Variant in _swap_preview:
-		var entry: Dictionary = _entries.get(int(id), {})
-		if entry.is_empty() or int(entry.get("col", -1)) != col:
-			continue
-		if int(entry.get("owner", -1)) != owner:
-			continue
-		var preview := node_for(int(id))
-		if preview != null:
-			preview.position = _swap_preview[id]
 
 
-## The six lane power labels, summed from the model: resolved cards only, like
-## GameManager._get_zone_total_power.
+## The six lane power labels, summed from the DISPLAY layout and resolved cards only, like
+## GameManager._get_zone_total_power. Display, not model: the number under a lane has to
+## agree with the cards that lane is showing, so a card queued to swap out stops counting
+## for its origin the moment it stops sitting there and counts for its destination instead.
 func _refresh_zone_power_texts() -> void:
 	if _board == null or not _board.has_method("update_zone_power_texts"):
 		return
@@ -1933,7 +2073,7 @@ func _refresh_zone_power_texts() -> void:
 	for col in MatchState.COLUMNS:
 		for owner in 2:
 			var total := 0
-			for raw: Variant in _zones.get(Vector2i(col, owner), []):
+			for raw: Variant in _display_ids(col, owner):
 				var entry: Dictionary = _entries.get(int(raw), {})
 				if entry.is_empty() or not bool(entry.get("resolved", false)):
 					continue
@@ -1960,66 +2100,6 @@ func _row(owner: int) -> int:
 ## BoardGeneration.SPELL_ZONE_ALLIED / SPELL_ZONE_ENEMY for the spell column.
 func _board_zone(col: int, owner: int) -> Vector2i:
 	return Vector2i(col, _row(owner))
-
-
-## (col, owner) -> Array mapping engine slot index to the index in
-## slots_by_zone that holds it. Measured from the live slot positions rather than
-## assumed, because the TOP row fills its slot list in reverse. _slot_order stays keyed
-## by the engine's (col, owner); only the Board lookup inside is a screen row.
-func _build_slot_order() -> void:
-	_slot_order.clear()
-	if _board == null:
-		return
-	for col in range(MatchState.SPELL_COL, MatchState.COLUMNS):
-		for owner in 2:
-			var zone := Vector2i(col, owner)
-			var row := _row(owner)
-			var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
-			var order: Array = []
-			order.resize(slots.size())
-			for s in slots.size():
-				var fallback: int = s if (col == MatchState.SPELL_COL or row == 1) \
-					else (slots.size() - 1 - s)
-				order[s] = fallback
-				if col == MatchState.SPELL_COL:
-					continue
-				var want: Vector2 = _board.get_slot_position(col, row, s)
-				for i in slots.size():
-					if slots[i].position.is_equal_approx(want):
-						order[s] = i
-						break
-			_slot_order[zone] = order
-
-
-func _slot_for(col: int, owner: int, slot: int) -> Variant:
-	if _board == null or slot < 0 or col < MatchState.SPELL_COL:
-		return null
-	var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
-	var order: Array = _slot_order.get(Vector2i(col, owner), [])
-	if slot >= order.size() or slot >= slots.size():
-		return null
-	var index := int(order[slot])
-	if index < 0 or index >= slots.size():
-		return null
-	return slots[index]
-
-
-func _slot_position(col: int, owner: int, slot: int) -> Vector2:
-	var slot_node: Variant = _slot_for(col, owner, slot)
-	if slot_node is Node and is_instance_valid(slot_node):
-		return slot_node.position
-	return Vector2.INF
-
-
-## Where a swap preview would drop the card: the first free slot in that column.
-func _first_free_slot_position(col: int, owner: int) -> Vector2:
-	if _board == null:
-		return Vector2.INF
-	var slots: Array = _board.slots_by_zone.get(_board_zone(col, owner), [])
-	for slot_node in slots:
-		if is_instance_valid(slot_node) and not bool(slot_node.card_in_slot):
-			return slot_node.position
-	return Vector2.INF
 
 
 # ----------------------------
