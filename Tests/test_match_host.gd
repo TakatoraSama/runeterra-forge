@@ -133,6 +133,12 @@ func _play_out(host: MatchHost) -> int:
 	return host.winner()
 
 
+## The state a host built by _lan_host() holds right before start_match(): the one its
+## opening snapshot describes.
+func _fresh_state() -> MatchState:
+	return MatchSetup.new_match(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED)
+
+
 func _first_hand_card(state: MatchState, player: int) -> int:
 	return int(state.players[player].hand[0])
 
@@ -167,14 +173,40 @@ func test_the_opening_snapshot_precedes_the_first_batch_and_is_seq_zero() -> voi
 	assert_eq(int(sink.deliveries[2]["seq"]), 0, "numbered 0, like the snapshot it followed")
 
 
-func test_a_viewer_outside_snapshot_viewers_never_gets_a_snapshot() -> void:
+## A plain LAN guest (no --verify-view) is not a snapshot viewer, but its whole view is
+## built from the opening snapshot. Before this contract it got none, never ran
+## presenter.setup() and crashed on its first summon.
+func test_a_viewer_outside_snapshot_viewers_gets_only_the_opening_snapshot() -> void:
 	var sink := Sink.new()
 	var host := _host(sink, [0, 1], [])
 	host.start(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED)
-	assert_eq(sink.snapshots, [], "no snapshot viewer, no snapshot")
-	assert_true(sink.batches.size() > 0, "but the events still flow")
-	for step in sink.timeline(0):
-		assert_eq(str(step[0]), "events", "viewer 0 only ever gets batches")
+	_ack_all(host)
+	assert_true(sink.batches.size() > 0, "the events flow")
+	for viewer in [0, 1]:
+		var timeline: Array = sink.timeline(viewer)
+		assert_true(timeline.size() > 1, "viewer %d got the opening batches" % viewer)
+		assert_eq(str(timeline[0][0]), "snapshot", "viewer %d opens on a snapshot" % viewer)
+		assert_eq(int(timeline[0][1]), 0, "numbered 0, before any batch")
+		var count: int = 0
+		for step in timeline:
+			if str(step[0]) == "snapshot":
+				count += 1
+		assert_eq(count, 1, "viewer %d gets exactly one snapshot: no per-batch ones" % viewer)
+		assert_eq(int(sink.snapshots_for(viewer)[0]["local"]), viewer, "and it is that viewer's own")
+
+
+func test_a_plain_guest_snapshot_is_the_redacted_one() -> void:
+	var sink := Sink.new()
+	var host := _host(sink, [0, 1], [0])
+	host.start(MatchDecks.DEFAULT_DECK_IDS, MatchDecks.BOT_DECK_IDS, SEED)
+	var received: Array = sink.snapshots_for(1)
+	assert_eq(received.size(), 1, "the plain guest received its opening snapshot")
+	if received.is_empty():
+		return
+	var opening: Dictionary = (received[0] as Dictionary).duplicate()
+	opening.erase("seq")
+	assert_eq(opening, MatchSnapshot.for_viewer(_fresh_state(), 1),
+		"the guest's opening snapshot is MatchSnapshot.for_viewer(state, 1) of the pre-start state")
 
 
 func test_a_snapshot_viewer_alternates_snapshot_and_batch_all_match() -> void:

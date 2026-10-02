@@ -48,7 +48,9 @@
 ##       sent BEFORE any batch (seq 0, so the view can be built before the first event)
 ##       and one after EVERY batch that viewer received, so a guest with no MatchState
 ##       can always --verify-view and autoplay from a picture of exactly what it has
-##       animated. A viewer outside snapshot_viewers gets events only.
+##       animated. EVERY viewer gets the opening one, because it is what builds the
+##       view (a guest has no MatchState to build it from); only the per-batch ones are
+##       limited to snapshot_viewers.
 ##
 ## ENGINE RULES (Scripts/Match, mandatory): RefCounted only, no Node, no get_node, no
 ## await, no timers, no autoload identifiers, no scene-tree access, no global randi()
@@ -70,8 +72,10 @@ var rules: MatchRules = null
 ## absolute: 0 = host, 1 = guest.
 var acks_required: Array[int] = []
 
-## Viewers that receive snapshots (join, and --verify-view). A viewer outside this list
-## only ever gets event batches.
+## Viewers that receive a snapshot after EVERY batch (--verify-view, and the guest
+## autoplay that decides from them). The opening snapshot is not limited by this list:
+## start() sends it to both viewers, because a view is built from it. A viewer outside
+## this list therefore gets the opening snapshot and then event batches only.
 var snapshot_viewers: Array[int] = []
 
 var _deliver_events: Callable
@@ -98,8 +102,8 @@ func _init(deliver_events: Callable, deliver_snapshot: Callable) -> void:
 
 
 ## Builds the match from `deck0` (host) and `deck1` (guest) and runs MatchRules
-## .start_match(lane_ids), delivering the opening snapshot to every snapshot viewer
-## before the opening event batch. `seed` is the match seed: the host picks it and it
+## .start_match(lane_ids), delivering the opening snapshot to BOTH viewers before the
+## opening event batch. `seed` is the match seed: the host picks it and it
 ## never leaves the host. `scramble_ids` (M5a Group A) permutes instance-id creation
 ## with a separate RNG so the guest cannot map the host's deck from draw ids; the main
 ## state.rng must stay untouched, or a --seed run stops replaying exactly.
@@ -115,7 +119,13 @@ func start(deck0: Array, deck1: Array, seed: int, scramble_ids: bool = false, la
 	_winner = -1
 	# The snapshot always precedes the events it explains, so it goes out first — and
 	# before start_match(), while the board is still empty and nothing has been drawn.
-	for viewer in snapshot_viewers:
+	#
+	# BOTH viewers get it, whatever snapshot_viewers says: it is what builds a view.
+	# A plain LAN guest (no --verify-view, so not a snapshot viewer) used to get none,
+	# never ran presenter.setup(), and crashed on the first event that needed a card
+	# node. snapshot_viewers only governs the per-batch snapshots in _deliver_to.
+	# Offline, viewer 0 is the bot: the controller drops its snapshot like its events.
+	for viewer in [0, 1]:
 		_deliver_snapshot_to(viewer, 0)
 	_publish(rules.start_match(lane_ids))
 
@@ -191,8 +201,8 @@ func winner() -> int:
 	return _winner
 
 
-## The full state `viewer` is allowed to see, from MatchSnapshot.for_viewer. Never
-## sent to a viewer outside snapshot_viewers. This is the authoritative view --verify-view
+## The full state `viewer` is allowed to see, from MatchSnapshot.for_viewer. Sent to
+## every viewer once at start(), then after each batch only to snapshot_viewers. This is the authoritative view --verify-view
 ## compares the presenter's model against.
 ##
 ## It carries NO "seq": that tag belongs to a DELIVERED snapshot, where it says how many

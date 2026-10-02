@@ -298,6 +298,9 @@ func setup(snapshot: Dictionary, local_player_id: int, p_controller: Node) -> vo
 	_set_flip_first_text()
 	_refresh_controls()
 	_refresh_zone_power_texts()
+	# lan_selftest's plain-guest run greps this: a guest whose view was never built is
+	# the one failure no [VIEW] ok/mismatch line can report, because it never verifies.
+	print("[VIEW] built player=%d card_manager=%s" % [local_player, _card_manager != null])
 
 
 ## Appends `events` to the queue. Returns at once; a single coroutine drains the queue in

@@ -18,6 +18,19 @@
 #   G47   Godot binary   (default /home/dev/Project/self/Godot_v4.7.2-stable_linux.x86_64;
 #         override in tools/local.env — see tools/local.env.example)
 #   OUT   log directory (default /tmp/lan_selftest)
+#   PLAIN_SEEDS  seeds for the PLAIN-guest run (default "5"; empty to skip it)
+#
+# The plain-guest run is the GUI join path: the guest has NO --verify-view and NO
+# --autoplay, so it does not ask for per-batch snapshots (want_snapshots = false) and
+# builds its view from the opening snapshot alone. It only ends its turns (--autopass);
+# the host autoplays. Its logs are plain_<SEED>_{host,guest}.log, and it PASSES when:
+#   - both peers exit 0, no SCRIPT ERROR / Parse Error in either log
+#   - the guest printed "[VIEW] built ... card_manager=true" (its view was set up)
+#   - the guest never had to hold events back ("[NET] events before snapshot")
+#   - the host has >= 1 [VIEW] ok and 0 [VIEW-MISMATCH]; 0 [LEAK]; 0 ack timeouts
+#   - each side has exactly one [MATCH] game_ended, with the SAME winner
+#   - both directions of the wire match, as for the normal seeds
+#   - >= 1 [PLAY] for the host (the guest only passes)
 #
 # A seed PASSES only when every one of these holds:
 #   - both peers exit 0
@@ -43,6 +56,8 @@ SEEDS=("$@")
 if [ "${#SEEDS[@]}" -eq 0 ]; then
 	SEEDS=(1 2 3 42)
 fi
+# shellcheck disable=SC2206
+PLAIN_SEEDS=(${PLAIN_SEEDS-5})
 
 # Seconds one seed's pair of peers may run before `timeout` gives up.
 PEER_TIMEOUT=240
@@ -65,6 +80,7 @@ echo "== lan_selftest =="
 echo "engine: $G47"
 echo "out:    $OUT"
 echo "seeds:  ${SEEDS[*]}"
+echo "plain:  ${PLAIN_SEEDS[*]:-<none>}"
 
 PASS=0
 FAIL_COUNT=0
@@ -74,8 +90,18 @@ FIRST_SEED=1
 # leaves the verdict in $FAIL (empty means the seed passed).
 run_seed() {
 	SEED="$1"
-	HOST_LOG="$OUT/seed_${SEED}_host.log"
-	GUEST_LOG="$OUT/seed_${SEED}_guest.log"
+	# "normal": both peers autoplay and verify. "plain": the guest joins like the GUI
+	# does (no snapshots requested) and only passes its turns.
+	MODE="${2:-normal}"
+	if [ "$MODE" = "plain" ]; then
+		TAG="plain_${SEED}"
+		GUEST_FLAGS=(--autopass)
+	else
+		TAG="seed_${SEED}"
+		GUEST_FLAGS=(--autoplay --verify-view)
+	fi
+	HOST_LOG="$OUT/${TAG}_host.log"
+	GUEST_LOG="$OUT/${TAG}_guest.log"
 	rm -f "$HOST_LOG" "$GUEST_LOG"
 
 	timeout "$PEER_TIMEOUT" "$G47" --headless --path . res://Scenes/Main.tscn -- \
@@ -86,7 +112,7 @@ run_seed() {
 	sleep 2
 
 	timeout "$PEER_TIMEOUT" "$G47" --headless --path . res://Scenes/Main.tscn -- \
-		--autojoin=127.0.0.1 --autoplay --verify-view --fast --quit-on-end --seed="$SEED" > "$GUEST_LOG" 2>&1 &
+		--autojoin=127.0.0.1 "${GUEST_FLAGS[@]}" --fast --quit-on-end --seed="$SEED" > "$GUEST_LOG" 2>&1 &
 	GUEST_PID=$!
 
 	wait "$HOST_PID";  HOST_RC=$?
@@ -102,15 +128,15 @@ run_seed() {
 		grep -E "^\[$1 " "$2" 2>/dev/null \
 			| sed -e "s/^\[$1 [0-9-]*\] //" || true
 	}
-	net_lines NET-OUT "$HOST_LOG"  > "$OUT/seed_${SEED}_host.netout"
-	net_lines NET-IN  "$HOST_LOG"  > "$OUT/seed_${SEED}_host.netin"
-	net_lines NET-OUT "$GUEST_LOG" > "$OUT/seed_${SEED}_guest.netout"
-	net_lines NET-IN  "$GUEST_LOG" > "$OUT/seed_${SEED}_guest.netin"
+	net_lines NET-OUT "$HOST_LOG"  > "$OUT/${TAG}_host.netout"
+	net_lines NET-IN  "$HOST_LOG"  > "$OUT/${TAG}_host.netin"
+	net_lines NET-OUT "$GUEST_LOG" > "$OUT/${TAG}_guest.netout"
+	net_lines NET-IN  "$GUEST_LOG" > "$OUT/${TAG}_guest.netin"
 
-	HOST_OUT_N=$(wc -l < "$OUT/seed_${SEED}_host.netout")
-	HOST_IN_N=$(wc -l < "$OUT/seed_${SEED}_host.netin")
-	GUEST_OUT_N=$(wc -l < "$OUT/seed_${SEED}_guest.netout")
-	GUEST_IN_N=$(wc -l < "$OUT/seed_${SEED}_guest.netin")
+	HOST_OUT_N=$(wc -l < "$OUT/${TAG}_host.netout")
+	HOST_IN_N=$(wc -l < "$OUT/${TAG}_host.netin")
+	GUEST_OUT_N=$(wc -l < "$OUT/${TAG}_guest.netout")
+	GUEST_IN_N=$(wc -l < "$OUT/${TAG}_guest.netin")
 
 	HOST_VIEWS=$(grep -c '^\[VIEW\] ok' "$HOST_LOG" 2>/dev/null || true)
 	GUEST_VIEWS=$(grep -c '^\[VIEW\] ok' "$GUEST_LOG" 2>/dev/null || true)
@@ -137,7 +163,16 @@ run_seed() {
 	[ "$ERRORS" -eq 0 ]   || PROBLEMS="${PROBLEMS} script-errors($ERRORS),"
 
 	[ "$HOST_VIEWS" -gt 0 ]  || PROBLEMS="${PROBLEMS} host-no-VIEW-ok,"
-	[ "$GUEST_VIEWS" -gt 0 ] || PROBLEMS="${PROBLEMS} guest-no-VIEW-ok,"
+	if [ "$MODE" = "plain" ]; then
+		# A plain guest never verifies, so a never-built view could only show up as a
+		# crash or a hang; this line is what proves setup() really ran.
+		grep -q '^\[VIEW\] built player=1 card_manager=true' "$GUEST_LOG" 2>/dev/null \
+			|| PROBLEMS="${PROBLEMS} guest-view-never-built,"
+		EARLY=$(grep -c '^\[NET\] events before snapshot' "$GUEST_LOG" 2>/dev/null || true)
+		[ "$EARLY" -eq 0 ] || PROBLEMS="${PROBLEMS} guest-events-before-snapshot($EARLY),"
+	else
+		[ "$GUEST_VIEWS" -gt 0 ] || PROBLEMS="${PROBLEMS} guest-no-VIEW-ok,"
+	fi
 	[ "$HOST_MM" -eq 0 ]      || PROBLEMS="${PROBLEMS} host-view-mismatch($HOST_MM),"
 	[ "$GUEST_MM" -eq 0 ]     || PROBLEMS="${PROBLEMS} guest-view-mismatch($GUEST_MM),"
 
@@ -148,12 +183,12 @@ run_seed() {
 
 	# Both directions of the wire must match exactly, and neither may be empty: an
 	# empty list would "match" trivially while proving nothing was ever exchanged.
-	if [ "$HOST_OUT_N" -gt 0 ] && cmp -s "$OUT/seed_${SEED}_host.netout" "$OUT/seed_${SEED}_guest.netin"; then
+	if [ "$HOST_OUT_N" -gt 0 ] && cmp -s "$OUT/${TAG}_host.netout" "$OUT/${TAG}_guest.netin"; then
 		NET_FWD=ok
 	else
 		NET_FWD="mismatch(host-out=$HOST_OUT_N guest-in=$GUEST_IN_N)"
 	fi
-	if [ "$GUEST_OUT_N" -gt 0 ] && cmp -s "$OUT/seed_${SEED}_guest.netout" "$OUT/seed_${SEED}_host.netin"; then
+	if [ "$GUEST_OUT_N" -gt 0 ] && cmp -s "$OUT/${TAG}_guest.netout" "$OUT/${TAG}_host.netin"; then
 		NET_BACK=ok
 	else
 		NET_BACK="mismatch(guest-out=$GUEST_OUT_N host-in=$HOST_IN_N)"
@@ -164,14 +199,16 @@ run_seed() {
 	[ "$LEAKS" -eq 0 ]        || PROBLEMS="${PROBLEMS} leaks($LEAKS),"
 	[ "$ACK_TIMEOUTS" -eq 0 ] || PROBLEMS="${PROBLEMS} ack-timeouts($ACK_TIMEOUTS),"
 	[ "$HOST_PLAYS" -gt 0 ]   || PROBLEMS="${PROBLEMS} no-host-plays,"
-	[ "$GUEST_PLAYS" -gt 0 ]  || PROBLEMS="${PROBLEMS} no-guest-plays,"
+	if [ "$MODE" != "plain" ]; then
+		[ "$GUEST_PLAYS" -gt 0 ]  || PROBLEMS="${PROBLEMS} no-guest-plays,"
+	fi
 
 	# --- report -------------------------------------------------------------------
 	if [ -z "$PROBLEMS" ]; then
-		echo "seed $SEED: PASS  views=$HOST_VIEWS/$GUEST_VIEWS  $HOST_WINNER  net=$HOST_OUT_N/$GUEST_OUT_N msgs  plays=p0:$HOST_PLAYS p1:$GUEST_PLAYS  (logs: $OUT/seed_${SEED}_*.log)"
+		echo "$TAG: PASS  views=$HOST_VIEWS/$GUEST_VIEWS  $HOST_WINNER  net=$HOST_OUT_N/$GUEST_OUT_N msgs  plays=p0:$HOST_PLAYS p1:$GUEST_PLAYS  (logs: $OUT/${TAG}_*.log)"
 		FAIL=""
 	else
-		echo "seed $SEED: FAIL  ${PROBLEMS%,}  (logs: $OUT/seed_${SEED}_*.log)"
+		echo "$TAG: FAIL  ${PROBLEMS%,}  (logs: $OUT/${TAG}_*.log)"
 		grep -m3 -e 'SCRIPT ERROR' -e 'Parse Error' -e '^\[VIEW-MISMATCH\]' -e '^\[LEAK\]' \
 			"$HOST_LOG" "$GUEST_LOG" 2>/dev/null | sed 's/^/    /'
 		FAIL="${PROBLEMS%,}"
@@ -184,6 +221,19 @@ for SEED in "${SEEDS[@]}"; do
 	fi
 	FIRST_SEED=0
 	run_seed "$SEED"
+	if [ -z "$FAIL" ]; then
+		PASS=$((PASS + 1))
+	else
+		FAIL_COUNT=$((FAIL_COUNT + 1))
+	fi
+done
+
+for SEED in "${PLAIN_SEEDS[@]}"; do
+	if [ "$FIRST_SEED" -eq 0 ]; then
+		sleep "$SEED_GAP"
+	fi
+	FIRST_SEED=0
+	run_seed "$SEED" plain
 	if [ -z "$FAIL" ]; then
 		PASS=$((PASS + 1))
 	else

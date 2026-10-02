@@ -85,6 +85,11 @@ var _acked_turn: int = -1
 ## whole view from scratch, so it must run exactly once; later snapshots are kept as the
 ## --verify-view reference and nothing more.
 var _view_built: bool = false
+## GUEST: event batches that arrived before the view was built, in arrival order. The
+## host always sends the opening snapshot first on the same reliable channel, so this
+## stays empty in practice; it is the backstop that turns a reordering into a delay
+## instead of a presenter running events against a board that does not exist yet.
+var _early_batches: Array = []
 ## The hidden-information auditor, watching the GUEST's stream against the live engine
 ## state. It is stream-based — it learns which opponent instances have legitimately
 ## been revealed — so it is built once per session and outlives every batch.
@@ -104,6 +109,11 @@ var _bot_running: bool = false
 var _dev_seed: int = -1
 var _dev_autoplay: bool = false
 var _dev_verify_view: bool = false
+## --autopass: end the turn every PLAY phase and play nothing. Needs no snapshot, so a
+## guest started with it is a PLAIN guest (want_snapshots = false), like a GUI join.
+var _dev_autopass: bool = false
+## The view turn --autopass last ended, so one PLAY phase is passed once.
+var _autopass_turn: int = -1
 ## A pending ack timeout, so a second one cannot be armed for the same turn.
 var _ack_timeout_turn: int = -1
 
@@ -386,9 +396,10 @@ func start_host(p_net: Node, host_deck: Array, guest_deck: Array, want_snapshots
 
 	host = MatchHost.new(_deliver_events, _deliver_snapshot)
 	host.acks_required = [0, 1]
-	# The host's own view is always built from a snapshot; the guest only gets one when
-	# it asked for snapshots (--verify-view / --autoplay), because on a normal LAN match
-	# it never needs a reference, only the event stream.
+	# Both views are built from the opening snapshot, which MatchHost.start() sends to
+	# every viewer. The PER-BATCH snapshots are only for a guest that asked for them
+	# (--verify-view / --autoplay): on a normal LAN match it needs no reference after
+	# the opening one, only the event stream.
 	host.snapshot_viewers = [local_player]
 	if want_snapshots:
 		host.snapshot_viewers.append(1)
@@ -419,6 +430,7 @@ func start_guest(p_net: Node) -> void:
 	_started = true
 	_session_ended = false
 	_acked_turn = -1
+	_early_batches.clear()
 	if presenter == null:
 		presenter = _find_presenter()
 	if presenter != null:
@@ -459,8 +471,15 @@ func on_remote_events(events: Array) -> void:
 		return
 	_note_batch_end(events)
 	_latest_seq += 1
-	if not events.is_empty():
-		presenter.call("enqueue", events)
+	if events.is_empty():
+		return
+	if not _view_built:
+		# The view is built from the opening snapshot; animating events before it would
+		# run them against a presenter with no board (the null CardManager crash).
+		print("[NET] events before snapshot: holding %d event(s) until the view is built" % events.size())
+		_early_batches.append(events)
+		return
+	presenter.call("enqueue", events)
 
 
 ## A host's full snapshot arrived (via MatchNet). GUEST mode: the first one (seq 0)
@@ -479,6 +498,10 @@ func on_remote_snapshot(snapshot: Dictionary) -> void:
 	if not _view_built:
 		_view_built = true
 		presenter.call("setup", snapshot, local_player, self)
+		var held: Array = _early_batches.duplicate()
+		_early_batches.clear()
+		for batch: Variant in held:
+			presenter.call("enqueue", batch)
 
 
 ## Ends the session for a reason the rules do not own. `reason` is a REASON_TEXT key of
@@ -537,6 +560,8 @@ func _parse_dev_args() -> void:
 			_dev_autoplay = true
 		elif arg == "--verify-view":
 			_dev_verify_view = true
+		elif arg == "--autopass":
+			_dev_autopass = true
 		elif arg == "--fast":
 			Engine.time_scale = 8.0
 
@@ -573,6 +598,12 @@ func _on_presenter_idle() -> void:
 		_verify_view_now()
 	_send_presentation_done()
 	_check_match_finished()
+	if _dev_autopass and not _dev_autoplay and is_play_phase():
+		var view_turn: int = int(presenter.get("_turn")) if presenter != null else -1
+		if view_turn != _autopass_turn:
+			_autopass_turn = view_turn
+			submit_local(MatchIntents.end_turn())
+		return
 	if not _dev_autoplay or not is_play_phase():
 		return
 	for intent: Variant in _decide_autoplay():
